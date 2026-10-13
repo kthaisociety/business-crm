@@ -341,3 +341,80 @@ test('nudges update when the tab becomes visible again', async () => {
 
   expect(card('Vinga Voice')).toHaveTextContent('Next step overdue: 2 days')
 })
+
+// jsdom has no DataTransfer; this is the part drag and drop uses.
+function fakeDataTransfer() {
+  const data: Record<string, string> = {}
+  return {
+    setData: (type: string, value: string) => void (data[type] = value),
+    getData: (type: string) => data[type] ?? '',
+    get types() {
+      return Object.keys(data)
+    },
+    effectAllowed: 'all',
+    dropEffect: 'none',
+  }
+}
+
+function drag(company: string, to: string) {
+  const dataTransfer = fakeDataTransfer()
+  const target = column(to)
+  fireEvent.dragStart(card(company), { dataTransfer })
+  fireEvent.dragOver(target, { dataTransfer })
+  fireEvent.drop(target, { dataTransfer })
+  fireEvent.dragEnd(card(company), { dataTransfer })
+}
+
+test('dragging a card to another column changes its status and saves it', async () => {
+  await renderApp()
+
+  drag('Lumen Health', 'Discussing')
+
+  expect(within(column('Discussing')).getByText('Lumen Health')).toBeInTheDocument()
+  expect(within(column('Lead')).queryByText('Lumen Health')).not.toBeInTheDocument()
+  expect(patches()).toEqual([{ method: 'PATCH', path: '/api/deals/lumen', body: { status: 'discussing' } }])
+})
+
+test('dropping a card back on its own column saves nothing', async () => {
+  await renderApp()
+
+  drag('Lumen Health', 'Lead')
+
+  expect(within(column('Lead')).getByText('Lumen Health')).toBeInTheDocument()
+  expect(patches()).toEqual([])
+})
+
+test('dropping something that is not a deal is ignored', async () => {
+  await renderApp()
+  const dataTransfer = fakeDataTransfer()
+  dataTransfer.setData('text/plain', 'lumen')
+
+  fireEvent.dragOver(column('Signed'), { dataTransfer })
+  fireEvent.drop(column('Signed'), { dataTransfer })
+
+  expect(within(column('Lead')).getByText('Lumen Health')).toBeInTheDocument()
+  expect(patches()).toEqual([])
+})
+
+test('a drag that fails to save puts the card back, with the reason', async () => {
+  api.fail('PATCH', /^\/api\/deals\//, 500)
+  await renderApp()
+
+  drag('Lumen Health', 'Signed')
+
+  expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't save Lumen Health: something went wrong (500)")
+  expect(within(column('Lead')).getByText('Lumen Health')).toBeInTheDocument()
+  expect(within(column('Signed')).queryByText('Lumen Health')).not.toBeInTheDocument()
+})
+
+test('a column lights up while a deal is dragged over it', async () => {
+  await renderApp()
+  const dataTransfer = fakeDataTransfer()
+  fireEvent.dragStart(card('Lumen Health'), { dataTransfer })
+
+  fireEvent.dragOver(column('Signed'), { dataTransfer })
+  expect(column('Signed')).toHaveClass('ring-2')
+
+  fireEvent.dragLeave(column('Signed'), { dataTransfer, relatedTarget: document.body })
+  expect(column('Signed')).not.toHaveClass('ring-2')
+})

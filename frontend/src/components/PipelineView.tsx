@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { KanbanSquare, List } from 'lucide-react'
-import { DEAL_TYPES, nudgeFor, type Deal, type DealType } from '../data/deals'
+import { DEAL_TYPES, nudgeFor, type Deal, type DealType, type Status } from '../data/deals'
 import KanbanBoard from './kanban/KanbanBoard'
 import DealTable from './list/DealTable'
 
 type Props = {
   deals: Deal[]
   onSelect: (id: string) => void
+  onMove: (id: string, status: Status) => void
 }
 
 const chip = (active: boolean) =>
@@ -14,7 +15,7 @@ const chip = (active: boolean) =>
     active ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
   }`
 
-export default function PipelineView({ deals, onSelect }: Props) {
+export default function PipelineView({ deals, onSelect, onMove }: Props) {
   const [view, setView] = useState<'board' | 'list'>('board')
   const [dealType, setDealType] = useState<DealType | 'all'>('all')
   const [followUpOnly, setFollowUpOnly] = useState(false)
@@ -64,7 +65,7 @@ export default function PipelineView({ deals, onSelect }: Props) {
         </button>
       </div>
       {view === 'board' ? (
-        <KanbanBoard deals={visible} showCanceled={showCanceled} onSelect={onSelect} />
+        <KanbanBoard deals={visible} showCanceled={showCanceled} onSelect={onSelect} onMove={onMove} />
       ) : (
         <DealTable deals={visible} onSelect={onSelect} />
       )}

@@ -146,7 +146,11 @@ export default function App() {
           ) : deals === null ? (
             <p className="m-6 text-sm text-gray-500">Loading deals…</p>
           ) : (
-            <PipelineView deals={inSemester.filter((deal) => matches(deal, query))} onSelect={setSelectedId} />
+            <PipelineView
+              deals={inSemester.filter((deal) => matches(deal, query))}
+              onSelect={setSelectedId}
+              onMove={(id, status) => saveDeal(id, { status })}
+            />
           )}
         </main>
       </div>
