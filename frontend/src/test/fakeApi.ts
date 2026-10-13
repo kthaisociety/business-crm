@@ -54,7 +54,7 @@ export function stubApi(options: { me?: () => Promise<Response> } = {}): FakeApi
         location: '',
         owner,
         support: [],
-        contact: lead.contactName || lead.contactEmail ? { name: lead.contactName, email: lead.contactEmail, role: '' } : null,
+        contact: lead.contactName || lead.contactEmail ? { name: lead.contactName, email: lead.contactEmail, role: lead.contactRole } : null,
         nextStep: lead.nextStep,
         nextStepDue: null,
         feeSEK: null,

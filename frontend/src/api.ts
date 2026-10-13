@@ -53,6 +53,7 @@ export type NewLeadInput = {
   semester: string
   contactName: string
   contactEmail: string
+  contactRole: string
   nextStep: string
 }
 

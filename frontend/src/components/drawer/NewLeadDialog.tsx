@@ -19,6 +19,7 @@ export default function NewLeadDialog({ semester, onCreate, onClose }: Props) {
   const [dealType, setDealType] = useState<DealType>('Event')
   const [contactName, setContactName] = useState('')
   const [contactEmail, setContactEmail] = useState('')
+  const [contactRole, setContactRole] = useState('')
   const [nextStep, setNextStep] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -37,6 +38,7 @@ export default function NewLeadDialog({ semester, onCreate, onClose }: Props) {
         dealType,
         contactName: contactName.trim(),
         contactEmail: contactEmail.trim(),
+        contactRole: contactRole.trim(),
         nextStep: nextStep.trim(),
       })
     } catch (err) {
@@ -86,6 +88,15 @@ export default function NewLeadDialog({ semester, onCreate, onClose }: Props) {
               <input type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} className={input} />
             </label>
           </div>
+          <label className="block">
+            Contact role
+            <input
+              value={contactRole}
+              onChange={(e) => setContactRole(e.target.value)}
+              className={input}
+              placeholder="e.g. Talent Acquisition Lead"
+            />
+          </label>
           <label className="block">
             Next step
             <input value={nextStep} onChange={(e) => setNextStep(e.target.value)} className={input} placeholder="e.g. Send intro email" />

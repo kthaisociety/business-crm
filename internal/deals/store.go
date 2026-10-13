@@ -88,6 +88,7 @@ func (s *Store) Create(ctx context.Context, lead NewLead, by auth.User) (View, e
 			OwnerID:      &owner.ID,
 			ContactName:  lead.ContactName,
 			ContactEmail: lead.ContactEmail,
+			ContactRole:  lead.ContactRole,
 			NextStep:     lead.NextStep,
 		}
 		if err := tx.Omit(clause.Associations).Create(&d).Error; err != nil {

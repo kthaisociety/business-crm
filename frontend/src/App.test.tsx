@@ -245,7 +245,15 @@ test('a new lead is saved to Lead in the selected semester, owned by the signed-
   expect(api.requests).toContainEqual({
     method: 'POST',
     path: '/api/deals',
-    body: { company: 'Nordljus AB', dealType: 'Event', semester: thisSemester, contactName: '', contactEmail: '', nextStep: 'Send intro email' },
+    body: {
+      company: 'Nordljus AB',
+      dealType: 'Event',
+      semester: thisSemester,
+      contactName: '',
+      contactEmail: '',
+      contactRole: '',
+      nextStep: 'Send intro email',
+    },
   })
 })
 
@@ -495,4 +503,15 @@ test('Reports sums up the semester and lists who needs a follow-up', async () =>
 
   fireEvent.click(within(followUp).getByRole('button', { name: 'Lumen Health' }))
   expect(screen.getByRole('dialog', { name: 'Lumen Health' })).toBeInTheDocument()
+})
+
+test('a new lead keeps the contact’s role, and Contacts shows it', async () => {
+  await renderApp()
+
+  await addLead({ Company: 'Nordljus AB', 'Contact name': 'Kim Ek', 'Contact email': 'kim@example.com', 'Contact role': 'Head of Talent' })
+
+  expect(await screen.findByRole('dialog', { name: 'Nordljus AB' })).toHaveTextContent('Kim Ek · Head of Talent')
+  fireEvent.keyDown(document, { key: 'Escape' })
+  goTo('Contacts')
+  expect(screen.getByRole('button', { name: 'Kim Ek' }).closest('tr')).toHaveTextContent('Head of Talent')
 })

@@ -35,6 +35,7 @@ type NewLead struct {
 	Semester     string `json:"semester"`
 	ContactName  string `json:"contactName"`
 	ContactEmail string `json:"contactEmail"`
+	ContactRole  string `json:"contactRole"`
 	NextStep     string `json:"nextStep"`
 }
 
@@ -42,6 +43,7 @@ func (n *NewLead) validate() error {
 	n.Company = strings.TrimSpace(n.Company)
 	n.ContactName = strings.TrimSpace(n.ContactName)
 	n.ContactEmail = strings.TrimSpace(n.ContactEmail)
+	n.ContactRole = strings.TrimSpace(n.ContactRole)
 	n.NextStep = strings.TrimSpace(n.NextStep)
 	switch {
 	case n.Company == "":
@@ -53,7 +55,7 @@ func (n *NewLead) validate() error {
 	case n.ContactEmail != "" && !strings.Contains(n.ContactEmail, "@"):
 		return invalid("contactEmail is not an email address")
 	}
-	for _, s := range []string{n.Company, n.ContactName, n.ContactEmail, n.NextStep} {
+	for _, s := range []string{n.Company, n.ContactName, n.ContactEmail, n.ContactRole, n.NextStep} {
 		if len(s) > maxText {
 			return invalid("fields are limited to %d characters", maxText)
 		}

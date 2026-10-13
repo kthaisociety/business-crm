@@ -50,7 +50,7 @@ The schema is SQL files in `internal/database/migrations/`, applied by the serve
 | `GET /api/health` | `{"service":"business-crm","status":"healthy"}`, or 503 if the database is unreachable |
 | `GET /api/me` | the signed-in user: `{"sub":"…","email":"…","name":"…"}`; 401 if no one is |
 | `GET /api/deals` | every deal, with owner, support and timeline |
-| `POST /api/deals` | adds a lead owned by the signed-in user: `{company, dealType, semester, contactName, contactEmail, nextStep}` |
+| `POST /api/deals` | adds a lead owned by the signed-in user: `{company, dealType, semester, contactName, contactEmail, contactRole, nextStep}` |
 | `PATCH /api/deals/:id` | changes `status`, `nextStep`, `nextStepDue`, `feeSEK` or `invoiceStatus`; `null` clears a nullable one |
 | `POST /api/deals/:id/notes` | adds a quick note to the deal's timeline: `{body}` |
 
