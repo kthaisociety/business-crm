@@ -48,3 +48,25 @@ test('a semester report adds up fees, wins and follow-ups', () => {
 test('a semester with nothing decided has no win rate', () => {
   expect(reportFor('VT 2000', fixtureDeals).winRate).toBeNull()
 })
+
+test('within a semester, the most recently added deal comes first', () => {
+  const older = { ...fixtureDeals[0], id: 'older', company: 'Nordljus AB', createdAt: '2026-09-01T00:00:00Z' }
+  const newer = { ...older, id: 'newer', createdAt: '2026-10-01T00:00:00Z' }
+
+  expect(companiesFrom([older, newer])[0].deals.map((d) => d.id)).toEqual(['newer', 'older'])
+})
+
+test('reports count teammates who share a name separately', () => {
+  const kim1 = { id: 'm-kim1', name: 'Kim Ek', email: 'kim1@example.com' }
+  const kim2 = { id: 'm-kim2', name: 'Kim Ek', email: 'kim2@example.com' }
+  const deals = [
+    { ...fixtureDeals[0], id: 'a', owner: kim1 },
+    { ...fixtureDeals[0], id: 'b', owner: kim1 },
+    { ...fixtureDeals[0], id: 'c', owner: kim2 },
+  ]
+
+  expect(reportFor(fixtureDeals[0].semester, deals).byOwner).toEqual([
+    { label: 'Kim Ek (kim1@example.com)', value: 2 },
+    { label: 'Kim Ek (kim2@example.com)', value: 1 },
+  ])
+})

@@ -6,14 +6,17 @@ import { fixtureDeals } from './fixtures'
 
 export const devUser = { sub: 'dev', email: 'dev@kthais.com', name: 'Dev User' }
 
-type Failure = { method: string; path: RegExp; status: number; error: string }
+type Failure = { method: string; path: RegExp; status: number; error: string; once: boolean }
 
 export type FakeApi = {
   deals: Deal[]
   requests: { method: string; path: string; body: unknown }[]
-  // Make matching requests fail until cleared with `failures.length = 0`.
+  // Make matching requests fail until cleared with `failures.length = 0`, or only the next one.
   failures: Failure[]
   fail: (method: string, path: RegExp, status?: number, error?: string) => void
+  failOnce: (method: string, path: RegExp, status?: number, error?: string) => void
+  // Hold matching requests unanswered until release() is called, to test what happens meanwhile.
+  hold: (method: string, path: RegExp) => { release: () => Promise<void> }
 }
 
 const json = (body: unknown, status = 200) =>
@@ -27,13 +30,31 @@ export function stubApi(options: { me?: () => Promise<Response> } = {}): FakeApi
     requests: [],
     failures: [],
     fail(method, path, status = 500, error = 'something went wrong') {
-      api.failures.push({ method, path, status, error })
+      api.failures.push({ method, path, status, error, once: false })
+    },
+    failOnce(method, path, status = 500, error = 'something went wrong') {
+      api.failures.push({ method, path, status, error, once: true })
+    },
+    hold(method, path) {
+      let release: () => void = () => {}
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      holds.push({ method, path, gate })
+      return {
+        release: async () => {
+          release()
+          await gate
+        },
+      }
     },
   }
+  const holds: { method: string; path: RegExp; gate: Promise<void> }[] = []
   const owner = { id: 'm-dev', name: devUser.name, email: devUser.email }
 
   const handle = async (method: string, path: string, body: unknown): Promise<Response> => {
+    const held = holds.find((h) => h.method === method && h.path.test(path))
+    if (held) await held.gate
     const failure = api.failures.find((f) => f.method === method && f.path.test(path))
+    if (failure?.once) api.failures.splice(api.failures.indexOf(failure), 1)
     if (failure) return json({ error: failure.error }, failure.status)
 
     if (method === 'GET' && path === '/api/me') return options.me ? options.me() : json(devUser)
@@ -63,6 +84,7 @@ export function stubApi(options: { me?: () => Promise<Response> } = {}): FakeApi
         links: {},
         rating: null,
         notes: '',
+        createdAt: new Date().toISOString(),
         activities: [
           { id: `a-${nextId++}`, type: 'note', source: 'manual', title: 'Added as a lead', timestamp: new Date().toISOString(), body: '' },
         ],

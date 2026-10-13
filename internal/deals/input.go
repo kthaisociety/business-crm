@@ -3,6 +3,7 @@ package deals
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"slices"
 	"strings"
@@ -84,8 +85,9 @@ func ParsePatch(body []byte) (map[string]any, error) {
 			}
 			cols["status"] = s
 		case "nextStep":
+			// Not nullable: null would decode to "" and silently erase the next step.
 			var s string
-			if json.Unmarshal(value, &s) != nil || len(s) > maxText {
+			if isNull || json.Unmarshal(value, &s) != nil || len(s) > maxText {
 				return nil, invalid("nextStep must be text of at most %d characters", maxText)
 			}
 			cols["next_step"] = s
@@ -108,9 +110,10 @@ func ParsePatch(body []byte) (map[string]any, error) {
 				cols["fee_sek"] = nil
 				continue
 			}
+			// fee_sek is a Postgres integer: anything larger fails in the driver, as a 500.
 			var n int
-			if json.Unmarshal(value, &n) != nil || n < 0 {
-				return nil, invalid("feeSEK must be a whole number of 0 or more, or null")
+			if json.Unmarshal(value, &n) != nil || n < 0 || n > math.MaxInt32 {
+				return nil, invalid("feeSEK must be a whole number from 0 to %d, or null", math.MaxInt32)
 			}
 			cols["fee_sek"] = n
 		case "invoiceStatus":

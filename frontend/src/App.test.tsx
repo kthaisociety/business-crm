@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
@@ -37,6 +37,8 @@ const open = (company: string) => {
   return screen.getByRole('dialog', { name: company })
 }
 const patches = () => api.requests.filter((r) => r.method === 'PATCH')
+// Lets queued saves go out, so a check that nothing was sent can't pass just by running too early.
+const settle = () => act(async () => {})
 
 test('shows the signed-in user', async () => {
   renderAt()
@@ -133,7 +135,7 @@ test('changing the status moves the card and saves it', async () => {
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   expect(within(column('Discussing')).getByText('Lumen Health')).toBeInTheDocument()
   expect(within(column('Lead')).queryByText('Lumen Health')).not.toBeInTheDocument()
-  expect(patches()).toEqual([{ method: 'PATCH', path: '/api/deals/lumen', body: { status: 'discussing' } }])
+  await waitFor(() => expect(patches()).toEqual([{ method: 'PATCH', path: '/api/deals/lumen', body: { status: 'discussing' } }]))
 })
 
 test('a change that fails to save goes back, with the reason', async () => {
@@ -155,7 +157,7 @@ test('moving the due date clears the overdue nudge', async () => {
   fireEvent.change(within(drawer).getByLabelText('Due'), { target: { value: '2099-01-01' } })
 
   expect(card('Kvarnholmen AI')).not.toHaveTextContent('overdue')
-  expect(patches()[0].body).toEqual({ nextStepDue: '2099-01-01' })
+  await waitFor(() => expect(patches()[0]?.body).toEqual({ nextStepDue: '2099-01-01' }))
 })
 
 test('the next step saves when you leave the field, not on every keystroke', async () => {
@@ -165,10 +167,11 @@ test('the next step saves when you leave the field, not on every keystroke', asy
 
   fireEvent.change(field, { target: { value: 'Book' } })
   fireEvent.change(field, { target: { value: 'Book a call' } })
+  await settle()
   expect(patches()).toEqual([])
 
   fireEvent.blur(field)
-  expect(patches()).toEqual([{ method: 'PATCH', path: '/api/deals/lumen', body: { nextStep: 'Book a call' } }])
+  await waitFor(() => expect(patches()).toEqual([{ method: 'PATCH', path: '/api/deals/lumen', body: { nextStep: 'Book a call' } }]))
   expect(card('Lumen Health')).toHaveTextContent('Book a call')
 })
 
@@ -306,6 +309,7 @@ test('a negative fee is not saved', async () => {
   fireEvent.blur(fee)
 
   expect(fee).toHaveValue(40000)
+  await settle()
   expect(patches()).toEqual([])
   expect(screen.getByText('Confirmed:')).toHaveTextContent('Confirmed: 40,000 SEK')
 })
@@ -388,7 +392,7 @@ test('dragging a card to another column changes its status and saves it', async 
 
   expect(within(column('Discussing')).getByText('Lumen Health')).toBeInTheDocument()
   expect(within(column('Lead')).queryByText('Lumen Health')).not.toBeInTheDocument()
-  expect(patches()).toEqual([{ method: 'PATCH', path: '/api/deals/lumen', body: { status: 'discussing' } }])
+  await waitFor(() => expect(patches()).toEqual([{ method: 'PATCH', path: '/api/deals/lumen', body: { status: 'discussing' } }]))
 })
 
 test('dropping a card back on its own column saves nothing', async () => {
@@ -397,6 +401,7 @@ test('dropping a card back on its own column saves nothing', async () => {
   drag('Lumen Health', 'Lead')
 
   expect(within(column('Lead')).getByText('Lumen Health')).toBeInTheDocument()
+  await settle()
   expect(patches()).toEqual([])
 })
 
@@ -409,6 +414,7 @@ test('dropping something that is not a deal is ignored', async () => {
   fireEvent.drop(column('Signed'), { dataTransfer })
 
   expect(within(column('Lead')).getByText('Lumen Health')).toBeInTheDocument()
+  await settle()
   expect(patches()).toEqual([])
 })
 
@@ -514,4 +520,74 @@ test('a new lead keeps the contact’s role, and Contacts shows it', async () =>
   fireEvent.keyDown(document, { key: 'Escape' })
   goTo('Contacts')
   expect(screen.getByRole('button', { name: 'Kim Ek' }).closest('tr')).toHaveTextContent('Head of Talent')
+})
+
+test('saves to a deal go out in order, and a failed one keeps a newer edit', async () => {
+  api.failOnce('PATCH', /^\/api\/deals\/lumen$/)
+  await renderApp()
+  open('Lumen Health')
+
+  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'discussing' } })
+  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'signed' } })
+
+  expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't save Lumen Health")
+  await waitFor(() => expect(patches().map((p) => p.body)).toEqual([{ status: 'discussing' }, { status: 'signed' }]))
+  expect(screen.getByLabelText('Status')).toHaveValue('signed')
+  expect(api.deals.find((d) => d.id === 'lumen')?.status).toBe('signed')
+})
+
+test('a failed save goes back to what the server last confirmed', async () => {
+  await renderApp()
+  open('Lumen Health')
+
+  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'discussing' } })
+  await waitFor(() => expect(patches()).toHaveLength(1))
+  api.failOnce('PATCH', /^\/api\/deals\/lumen$/)
+  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'signed' } })
+
+  expect(await screen.findByRole('alert')).toBeInTheDocument()
+  expect(screen.getByLabelText('Status')).toHaveValue('discussing')
+})
+
+test('New Lead waits for the deal list, so a late load can’t hide a new lead', async () => {
+  const deals = api.hold('GET', /^\/api\/deals$/)
+  render(
+    <MemoryRouter>
+      <App />
+    </MemoryRouter>,
+  )
+  await screen.findByText('Signed in as dev@kthais.com')
+  expect(screen.getByRole('button', { name: 'New Lead' })).toBeDisabled()
+
+  await act(() => deals.release())
+  expect(await screen.findByText('Kvarnholmen AI')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'New Lead' })).toBeEnabled()
+})
+
+test('a note saving in the background doesn’t erase what you type next', async () => {
+  const save = api.hold('POST', /\/notes$/)
+  await renderApp()
+  const drawer = open('Lumen Health')
+  const box = within(drawer).getByLabelText('Quick note')
+
+  fireEvent.change(box, { target: { value: 'First note' } })
+  fireEvent.click(within(drawer).getByRole('button', { name: 'Save Note' }))
+  fireEvent.change(box, { target: { value: 'Second thought' } })
+  await act(() => save.release())
+
+  expect(await within(drawer).findByText('First note')).toBeInTheDocument()
+  expect(box).toHaveValue('Second thought')
+})
+
+test('the New Lead form stays open until its lead is saved', async () => {
+  const save = api.hold('POST', /^\/api\/deals$/)
+  await renderApp()
+  const form = await addLead({ Company: 'Nordljus AB' })
+
+  fireEvent.keyDown(document, { key: 'Escape' })
+  expect(form).toBeInTheDocument()
+
+  await act(() => save.release())
+  expect(await screen.findByRole('dialog', { name: 'Nordljus AB' })).toBeInTheDocument()
+  expect(screen.queryByRole('dialog', { name: 'New lead' })).not.toBeInTheDocument()
 })

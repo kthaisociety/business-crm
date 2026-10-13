@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -104,4 +105,27 @@ func TestDealsNeedSignIn(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, get(r, "/api/deals").Code)
 	assert.Equal(t, http.StatusUnauthorized, send(r, http.MethodPost, "/api/deals", `{}`).Code)
+}
+
+func TestOversizedBodiesAreRefused(t *testing.T) {
+	r := newDealsRouter(t)
+	created := decode[deals.View](t, send(r, http.MethodPost, "/api/deals", `{"company":"Nordljus AB","dealType":"Event","semester":"HT 2026"}`))
+	huge := `{"body":"` + strings.Repeat("x", 1<<20) + `"}`
+
+	for _, path := range []string{"/api/deals", "/api/deals/" + created.ID, "/api/deals/" + created.ID + "/notes"} {
+		method := http.MethodPost
+		if path == "/api/deals/"+created.ID {
+			method = http.MethodPatch
+		}
+		w := send(r, method, path, huge)
+		assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code, path)
+	}
+}
+
+func TestDealsCarryWhenTheyWereAdded(t *testing.T) {
+	r := newDealsRouter(t)
+	created := decode[deals.View](t, send(r, http.MethodPost, "/api/deals", `{"company":"Nordljus AB","dealType":"Event","semester":"HT 2026"}`))
+
+	_, err := time.Parse(time.RFC3339Nano, created.CreatedAt)
+	assert.NoError(t, err)
 }
