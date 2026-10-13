@@ -1,12 +1,15 @@
 // The frontend talks only to its own backend, on the same origin (docs/adr/0001). No URLs are baked
 // in at build time.
 
-import type { Activity, Company, Contact, Deal, DealType } from './data/deals'
+import type { Activity, Company, Contact, Deal, DealType, Person, Role } from './data/deals'
 
 export type User = {
   sub: string
   email: string
   name: string
+  // Who they are on the team; signing in adds them to it (docs/adr/0003).
+  memberId?: string
+  role?: Role
 }
 
 // A failed API call. The message is the server's reason when it gave one (400s say what was wrong).
@@ -52,6 +55,7 @@ export type ContactInput = { name: string; email: string; role: string }
 // The company is an existing one (companyId) or a new one by name (company); the contact is an existing
 // one (contactId), a new one (contact), or none.
 export type NewLeadInput = {
+  ownerId: string | null // null: no one has claimed it yet
   companyId?: string
   company?: string
   contactId?: string
@@ -66,6 +70,7 @@ export const createDeal = (lead: NewLeadInput) => call<Deal>('POST', '/api/deals
 // The fields the deal panel edits; the API rejects any other.
 export type DealPatch = Partial<Pick<Deal, 'status' | 'nextStep' | 'nextStepDue' | 'feeSEK' | 'invoiceStatus'>> & {
   contactId?: string | null
+  ownerId?: string | null
 }
 
 export const updateDeal = (id: string, patch: DealPatch) =>
@@ -88,3 +93,12 @@ export const createContact = (contact: ContactFields) => call<Contact>('POST', '
 export const updateContact = (id: string, patch: Partial<ContactFields>) =>
   call<Contact>('PATCH', `/api/contacts/${encodeURIComponent(id)}`, patch)
 export const deleteContact = (id: string) => call<void>('DELETE', `/api/contacts/${encodeURIComponent(id)}`)
+
+export const fetchMembers = (signal?: AbortSignal) => call<Person[]>('GET', '/api/members', undefined, signal)
+
+// Admins only (the API answers 403 otherwise).
+export type MemberInput = { email: string; name: string; role: Role }
+export const addMember = (member: MemberInput) => call<Person>('POST', '/api/members', member)
+export const updateMember = (id: string, patch: Partial<Pick<MemberInput, 'name' | 'role'>>) =>
+  call<Person>('PATCH', `/api/members/${encodeURIComponent(id)}`, patch)
+export const removeMember = (id: string) => call<void>('DELETE', `/api/members/${encodeURIComponent(id)}`)

@@ -3,8 +3,8 @@
 // rules: unique company names and contact emails, a deal's contact at its company, and no deleting a
 // company or contact that deals point at.
 import { vi } from 'vitest'
-import type { Activity, Company, Contact, Deal } from '../data/deals'
-import { fixtureCompanies, fixtureContacts, fixtureDeals } from './fixtures'
+import type { Activity, Company, Contact, Deal, Person, Role } from '../data/deals'
+import { devMember, fixtureCompanies, fixtureContacts, fixtureDeals, fixtureMembers } from './fixtures'
 
 export const devUser = { sub: 'dev', email: 'dev@kthais.com', name: 'Dev User' }
 
@@ -12,6 +12,7 @@ type Failure = { method: string; path: RegExp; status: number; error: string; on
 
 export type FakeApi = {
   deals: Deal[]
+  members: Person[]
   companies: Company[]
   contacts: Contact[]
   requests: { method: string; path: string; body: unknown }[]
@@ -32,9 +33,12 @@ const id = (prefix: string) => `${prefix}-new-${nextId++}`
 
 type Body = Record<string, unknown>
 
-export function stubApi(options: { me?: () => Promise<Response> } = {}): FakeApi {
+// `role` is the dev user's role on the team: admin unless a test says otherwise.
+export function stubApi(options: { me?: () => Promise<Response>; role?: Role } = {}): FakeApi {
+  const role = options.role ?? 'admin'
   const api: FakeApi = {
     deals: structuredClone(fixtureDeals),
+    members: structuredClone(fixtureMembers).map((m) => (m.id === devMember.id ? { ...m, role } : m)),
     companies: structuredClone(fixtureCompanies),
     contacts: structuredClone(fixtureContacts),
     requests: [],
@@ -58,7 +62,6 @@ export function stubApi(options: { me?: () => Promise<Response> } = {}): FakeApi
     },
   }
   const holds: { method: string; path: RegExp; gate: Promise<void> }[] = []
-  const owner = { id: 'm-dev', name: devUser.name, email: devUser.email }
   const sameText = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
   const emailTaken = (email: string, except?: string) =>
     email !== '' && api.contacts.some((c) => c.id !== except && sameText(c.email, email))
@@ -76,7 +79,10 @@ export function stubApi(options: { me?: () => Promise<Response> } = {}): FakeApi
     if (failure?.once) api.failures.splice(api.failures.indexOf(failure), 1)
     if (failure) return error(failure.status, failure.error)
 
-    if (method === 'GET' && path === '/api/me') return options.me ? options.me() : json(devUser)
+    if (method === 'GET' && path === '/api/me') {
+      return options.me ? options.me() : json({ ...devUser, memberId: devMember.id, role })
+    }
+    if (method === 'GET' && path === '/api/members') return json(api.members)
     if (method === 'GET' && path === '/api/deals') return json(api.deals)
     if (method === 'GET' && path === '/api/companies') return json(api.companies)
     if (method === 'GET' && path === '/api/contacts') return json(api.contacts)
@@ -112,7 +118,7 @@ export function stubApi(options: { me?: () => Promise<Response> } = {}): FakeApi
         startDate: null,
         endDate: null,
         location: '',
-        owner,
+        owner: api.members.find((m) => m.id === body.ownerId) ?? null,
         support: [],
         contact,
         nextStep: (body.nextStep as string) ?? '',
@@ -130,6 +136,32 @@ export function stubApi(options: { me?: () => Promise<Response> } = {}): FakeApi
       }
       api.deals.push(deal)
       return json(deal, 201)
+    }
+
+    const member = path.match(/^\/api\/members(?:\/([^/]+))?$/)
+    if (member && method !== 'GET') {
+      if (role !== 'admin') return error(403, 'only admins can change the team')
+      if (method === 'POST') {
+        if (api.members.some((m) => sameText(m.email, body.email as string))) return error(409, `${body.email} is already on the team`)
+        const added = { id: id('m'), ...body } as Person
+        api.members.push(added)
+        return json(added, 201)
+      }
+      const found = api.members.find((m) => m.id === member[1])
+      if (!found) return error(404, 'team member not found')
+      const admins = api.members.filter((m) => m.role === 'admin').length
+      if (found.role === 'admin' && admins === 1 && (method === 'DELETE' || body.role !== 'admin')) {
+        return error(409, 'the team needs at least one admin')
+      }
+      if (method === 'PATCH') {
+        Object.assign(found, body)
+        return json(found)
+      }
+      if (api.deals.some((d) => d.owner?.id === found.id || d.support.some((p) => p.id === found.id))) {
+        return error(409, `${found.name} owns or supports deals; reassign them first`)
+      }
+      api.members = api.members.filter((m) => m !== found)
+      return new Response(null, { status: 204 })
     }
 
     if (method === 'POST' && path === '/api/companies') {
@@ -191,7 +223,12 @@ export function stubApi(options: { me?: () => Promise<Response> } = {}): FakeApi
     const deal = match && api.deals.find((d) => d.id === decodeURIComponent(match[1]))
     if (match && !deal) return error(404, 'deal not found')
     if (deal && method === 'PATCH' && !match[2]) {
-      const { contactId, ...fields } = body
+      const { contactId, ownerId, ...fields } = body
+      if (ownerId !== undefined) {
+        const next = ownerId === null ? null : api.members.find((m) => m.id === ownerId)
+        if (next === undefined) return error(400, 'ownerId is not a team member')
+        deal.owner = next
+      }
       if (contactId !== undefined) {
         const next = contactId === null ? null : api.contacts.find((c) => c.id === contactId)
         if (next === undefined || (next && next.companyId !== deal.companyId)) return error(400, 'that contact isn’t at the company')

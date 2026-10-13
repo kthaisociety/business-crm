@@ -10,6 +10,7 @@ import {
   type Activity,
   type Contact,
   type Deal,
+  type Person,
   type InvoiceStatus,
   type Status,
 } from '../../data/deals'
@@ -23,6 +24,8 @@ type Props = {
   deal: Deal
   otherDeals: Deal[] // earlier or parallel deals with the same company
   companyContacts: Contact[] // who the deal's contact can be
+  members: Person[] // who can own the deal
+  meId: string | undefined
   onClose: () => void
   onChange: (patch: DealPatch) => void
   onAddNote: (text: string) => Promise<void>
@@ -48,7 +51,17 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-export default function DealDetailDrawer({ deal, otherDeals, companyContacts, onClose, onChange, onAddNote, onSelect }: Props) {
+export default function DealDetailDrawer({
+  deal,
+  otherDeals,
+  companyContacts,
+  members,
+  meId,
+  onClose,
+  onChange,
+  onAddNote,
+  onSelect,
+}: Props) {
   const [note, setNote] = useState('')
   const [savingNote, setSavingNote] = useState(false)
   const [noteError, setNoteError] = useState<string | null>(null)
@@ -194,13 +207,31 @@ export default function DealDetailDrawer({ deal, otherDeals, companyContacts, on
 
           <dl className="mx-5 mt-4 grid grid-cols-[auto_1fr] items-center gap-x-6 gap-y-1.5 text-xs">
             <Row label="Owner">
-              {deal.owner ? (
-                <span className="flex items-center gap-2">
-                  <OwnerAvatar owner={deal.owner} /> {deal.owner.name}
-                </span>
-              ) : (
-                <span className="text-gray-400">Unassigned</span>
-              )}
+              <span className="flex flex-wrap items-center gap-2">
+                {deal.owner && <OwnerAvatar owner={deal.owner} />}
+                <select
+                  aria-label="Owner"
+                  value={deal.owner?.id ?? ''}
+                  onChange={(e) => onChange({ ownerId: e.target.value || null })}
+                  className={`${field} w-auto max-w-full`}
+                >
+                  <option value="">Unassigned</option>
+                  {members.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+                {meId && deal.owner?.id !== meId && (
+                  <button
+                    type="button"
+                    onClick={() => onChange({ ownerId: meId })}
+                    className="text-xs font-semibold text-indigo-700 hover:underline"
+                  >
+                    Assign to me
+                  </button>
+                )}
+              </span>
             </Row>
             {deal.support.length > 0 && <Row label="Support">{deal.support.map((p) => p.name).join(', ')}</Row>}
             <Row label="Contact">

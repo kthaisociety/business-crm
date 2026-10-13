@@ -48,7 +48,7 @@ func main() {
 		PingDB:   func(ctx context.Context) error { return database.Ping(ctx, db) },
 		Frontend: frontend.Dist(),
 		DevUser:  cfg.DevUser(),
-		Deals:    deals.NewStore(db),
+		Deals:    deals.NewStore(db, cfg.AdminEmails...),
 	})
 
 	srv := &http.Server{

@@ -248,7 +248,7 @@ test('a new lead is saved to Lead in the selected semester, owned by the signed-
   expect(api.requests).toContainEqual({
     method: 'POST',
     path: '/api/deals',
-    body: { company: 'Nordljus AB', dealType: 'Event', semester: thisSemester, nextStep: 'Send intro email' },
+    body: { ownerId: 'm-dev', company: 'Nordljus AB', dealType: 'Event', semester: thisSemester, nextStep: 'Send intro email' },
   })
 })
 
@@ -532,7 +532,14 @@ test('a new lead at an existing company can pick one of its contacts', async () 
   expect(api.requests).toContainEqual({
     method: 'POST',
     path: '/api/deals',
-    body: { companyId: 'c-granit-consulting', contactId: 'p-lina-dahl-example-com', dealType: 'Event', semester: thisSemester, nextStep: '' },
+    body: {
+      ownerId: 'm-dev',
+      companyId: 'c-granit-consulting',
+      contactId: 'p-lina-dahl-example-com',
+      dealType: 'Event',
+      semester: thisSemester,
+      nextStep: '',
+    },
   })
   expect(api.companies.filter((c) => c.name === 'Granit Consulting')).toHaveLength(1)
 })
@@ -801,4 +808,104 @@ test('a refresh that fails after a save can be retried on its own', async () => 
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
   expect(await screen.findByRole('button', { name: 'Aurora AB' })).toBeInTheDocument()
   expect(api.requests.filter((r) => r.method === 'POST')).toHaveLength(posts) // the company isn't added twice
+})
+
+test('a new lead can start unassigned', async () => {
+  await renderApp()
+
+  await addLead({ Company: 'Nordljus AB', Owner: '' })
+
+  const drawer = await screen.findByRole('dialog', { name: 'Nordljus AB' })
+  expect(within(drawer).getByLabelText('Owner')).toHaveDisplayValue('Unassigned')
+  expect(api.requests.find((r) => r.method === 'POST' && r.path === '/api/deals')?.body).toMatchObject({ ownerId: null })
+  fireEvent.keyDown(document, { key: 'Escape' })
+  expect(card('Nordljus AB')).toHaveTextContent('Unassigned')
+})
+
+test('anyone can claim an unassigned lead, in any stage', async () => {
+  await renderApp()
+  expect(card('Stadsnät Labs')).toHaveTextContent('Unassigned')
+  const drawer = open('Stadsnät Labs')
+
+  fireEvent.click(within(drawer).getByRole('button', { name: 'Assign to me' }))
+
+  expect(within(drawer).getByLabelText('Owner')).toHaveDisplayValue('Dev User')
+  expect(within(drawer).queryByRole('button', { name: 'Assign to me' })).not.toBeInTheDocument()
+  await waitFor(() => expect(patches()).toEqual([{ method: 'PATCH', path: '/api/deals/stadsnat', body: { ownerId: 'm-dev' } }]))
+  expect(card('Stadsnät Labs')).not.toHaveTextContent('Unassigned')
+})
+
+test('a deal can be handed to someone else, or unassigned', async () => {
+  await renderApp()
+  const drawer = open('Granit Consulting')
+
+  fireEvent.change(within(drawer).getByLabelText('Owner'), { target: { value: 'm-iris' } })
+  expect(within(drawer).getByLabelText('Owner')).toHaveDisplayValue('Iris Wallin')
+
+  fireEvent.change(within(drawer).getByLabelText('Owner'), { target: { value: '' } })
+  await waitFor(() => expect(patches().map((p) => p.body)).toEqual([{ ownerId: 'm-iris' }, { ownerId: null }]))
+  expect(card('Granit Consulting')).toHaveTextContent('Unassigned')
+})
+
+test('the board filters to my deals or unassigned ones', async () => {
+  await renderApp()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Unassigned' }))
+  expect(screen.getByText('Stadsnät Labs')).toBeInTheDocument()
+  expect(screen.queryByText('Granit Consulting')).not.toBeInTheDocument()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Unassigned' }))
+  open('Lumen Health')
+  fireEvent.click(screen.getByRole('button', { name: 'Assign to me' }))
+  fireEvent.keyDown(document, { key: 'Escape' })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Mine' }))
+  expect(screen.getByText('Lumen Health')).toBeInTheDocument()
+  expect(screen.queryByText('Stadsnät Labs')).not.toBeInTheDocument()
+  expect(screen.queryByText('Granit Consulting')).not.toBeInTheDocument()
+})
+
+test('Team lists the business team; admins add members and change roles', async () => {
+  renderAt('/team')
+
+  const iris = (await screen.findByText('Iris Wallin')).closest('tr')!
+  expect(within(iris).getByLabelText('Role of Iris Wallin')).toHaveDisplayValue('Member')
+  expect(screen.getByText('Dev User').closest('tr')).toHaveTextContent('(you)')
+
+  fireEvent.change(within(iris).getByLabelText('Role of Iris Wallin'), { target: { value: 'board' } })
+  await waitFor(() => expect(api.members.find((m) => m.id === 'm-iris')?.role).toBe('board'))
+
+  fireEvent.click(screen.getByRole('button', { name: 'Add member' }))
+  const form = await dialogNamed('Add member')
+  fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'Mia Lind' } })
+  fireEvent.change(within(form).getByLabelText('Email'), { target: { value: 'mia@example.com' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Add member' }))
+  const mia = (await screen.findByText('Mia Lind')).closest('tr')!
+
+  // Someone without deals can be removed; someone with deals can't.
+  expect(within(iris).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+  fireEvent.click(within(mia).getByRole('button', { name: 'Delete' }))
+  fireEvent.click(within(mia).getByRole('button', { name: 'Delete Mia Lind' }))
+  await waitFor(() => expect(screen.queryByText('Mia Lind')).not.toBeInTheDocument())
+})
+
+test('a role change the server refuses shows why', async () => {
+  api.fail('PATCH', /^\/api\/members\//, 409, 'the team needs at least one admin')
+  renderAt('/team')
+
+  const alva = (await screen.findByText('Alva Lindqvist')).closest('tr')!
+  fireEvent.change(within(alva).getByLabelText('Role of Alva Lindqvist'), { target: { value: 'member' } })
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('the team needs at least one admin (409)')
+})
+
+test('members see the team but can’t change it', async () => {
+  api = stubApi({ role: 'member' })
+  renderAt('/team')
+
+  const iris = (await screen.findByText('Iris Wallin')).closest('tr')!
+  expect(iris).toHaveTextContent('Member')
+  expect(within(iris).queryByRole('combobox')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Add member' })).not.toBeInTheDocument()
+  expect(await screen.findByText('member', { selector: 'p' })).toBeInTheDocument()
 })

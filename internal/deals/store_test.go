@@ -21,8 +21,10 @@ func newStore(t *testing.T) *deals.Store {
 
 func addLead(t *testing.T, s *deals.Store, company string) deals.View {
 	t.Helper()
+	owner, err := s.SignIn(context.Background(), alva)
+	require.NoError(t, err)
 	d, err := s.Create(context.Background(), deals.NewLead{
-		Company: company, DealType: "Event", Semester: "HT 2026", NextStep: "Send intro email",
+		OwnerID: &owner.ID, Company: company, DealType: "Event", Semester: "HT 2026", NextStep: "Send intro email",
 		Contact: &deals.ContactInput{Name: "Kim Ek", Email: "kim." + strings.ToLower(strings.Fields(company)[0]) + "@example.com", Role: "Head of Talent"},
 	}, alva)
 	require.NoError(t, err)

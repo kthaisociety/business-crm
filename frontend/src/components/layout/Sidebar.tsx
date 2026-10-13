@@ -1,4 +1,4 @@
-import { BarChart3, Building2, KanbanSquare, Mail, Users } from 'lucide-react'
+import { BarChart3, Building2, KanbanSquare, Mail, UserCog, Users } from 'lucide-react'
 import { NavLink } from 'react-router'
 import type { User } from '../../api'
 
@@ -12,6 +12,7 @@ const pages = [
   { label: 'Companies', icon: Building2, path: '/companies' },
   { label: 'Contacts', icon: Users, path: '/contacts' },
   { label: 'Reports', icon: BarChart3, path: '/reports' },
+  { label: 'Team', icon: UserCog, path: '/team' },
 ]
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
@@ -43,6 +44,7 @@ export default function Sidebar({ user, userError }: Props) {
 
       <div className="mt-auto border-t border-gray-100 pt-3 text-[11px] text-gray-500">
         {user && <p>Signed in as {user.email}</p>}
+        {user?.role && <p className="mt-0.5 text-gray-400 capitalize">{user.role}</p>}
         {userError && <p className="text-red-600">{userError}</p>}
         {!user && !userError && <p>Loading…</p>}
       </div>

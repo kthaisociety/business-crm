@@ -17,11 +17,15 @@ const daysFromNow = (n: number) => today(new Date(Date.now() + n * DAY))
 const hoursAgo = (n: number) => new Date(Date.now() - n * 60 * 60 * 1000).toISOString()
 const daysAgo = (n: number) => hoursAgo(n * 24)
 
-const alva: Person = { id: 'm-alva', name: 'Alva Lindqvist', email: 'alva.lindqvist@example.com' }
-const oskar: Person = { id: 'm-oskar', name: 'Oskar Berg', email: 'oskar.berg@example.com' }
-const maja: Person = { id: 'm-maja', name: 'Maja Holm', email: 'maja.holm@example.com' }
-const noah: Person = { id: 'm-noah', name: 'Noah Ek', email: 'noah.ek@example.com' }
-const iris: Person = { id: 'm-iris', name: 'Iris Wallin', email: 'iris.wallin@example.com' }
+const alva: Person = { id: 'm-alva', name: 'Alva Lindqvist', email: 'alva.lindqvist@example.com', role: 'admin' }
+const oskar: Person = { id: 'm-oskar', name: 'Oskar Berg', email: 'oskar.berg@example.com', role: 'board' }
+const maja: Person = { id: 'm-maja', name: 'Maja Holm', email: 'maja.holm@example.com', role: 'board' }
+const noah: Person = { id: 'm-noah', name: 'Noah Ek', email: 'noah.ek@example.com', role: 'member' }
+const iris: Person = { id: 'm-iris', name: 'Iris Wallin', email: 'iris.wallin@example.com', role: 'member' }
+
+// The team, with the dev user every test signs in as (test/fakeApi.ts).
+export const devMember: Person = { id: 'm-dev', name: 'Dev User', email: 'dev@kthais.com', role: 'admin' }
+export const fixtureMembers: Person[] = [alva, devMember, iris, maja, noah, oskar]
 
 const base = {
   startDate: null,
@@ -194,7 +198,7 @@ const rawDeals: RawDeal[] = [
     audience: 'Unclear',
     semester: thisSemester,
     status: 'lead',
-    owner: oskar,
+    owner: null, // no one has claimed it yet
     contact: { name: 'Sara Kvist', email: 'sara.kvist@example.com', role: 'Innovation Manager' },
     nextStep: 'Await reply to follow-up email',
     notes: 'Met at a career fair. Want to reach students; open to an event or exposure.',

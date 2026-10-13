@@ -33,12 +33,13 @@ func NewRouter(d Deps) *gin.Engine {
 	api.GET("/health", health(d.PingDB))
 
 	signedIn := api.Group("", auth.Middleware(d.DevUser))
-	signedIn.GET("/me", me)
+	signedIn.GET("/me", me(d.Deals))
 	signedIn.GET("/deals", listDeals(d.Deals))
 	signedIn.POST("/deals", createDeal(d.Deals))
 	signedIn.PATCH("/deals/:id", updateDeal(d.Deals))
 	signedIn.POST("/deals/:id/notes", addNote(d.Deals))
 	registerCompanies(signedIn, d.Deals)
+	registerTeam(signedIn, d.Deals)
 
 	r.NoRoute(frontend(d.Frontend))
 	return r
@@ -54,8 +55,21 @@ func health(pingDB func(ctx context.Context) error) gin.HandlerFunc {
 	}
 }
 
-func me(c *gin.Context) {
-	c.JSON(http.StatusOK, auth.Current(c))
+// me is the signed-in user and, with a store, who they are on the team: signing in adds them to it.
+func me(store *deals.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		user := auth.Current(c)
+		if store == nil {
+			c.JSON(http.StatusOK, user)
+			return
+		}
+		member, err := store.SignIn(c.Request.Context(), user)
+		if err != nil {
+			fail(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"sub": user.Subject, "email": user.Email, "name": user.Name, "memberId": member.ID, "role": member.Role})
+	}
 }
 
 // frontend serves the single-page app: a file if one exists at the path, otherwise index.html so

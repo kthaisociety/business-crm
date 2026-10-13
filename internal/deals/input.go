@@ -73,6 +73,7 @@ func (c *ContactInput) validate() error {
 // by name (Company), which reuses a company of that name if there is one. The contact is likewise an
 // existing one (ContactID), a new one (Contact), or none.
 type NewLead struct {
+	OwnerID   *string       `json:"ownerId"` // absent or null: no owner yet
 	CompanyID string        `json:"companyId"`
 	Company   string        `json:"company"`
 	ContactID string        `json:"contactId"`
@@ -228,6 +229,16 @@ func ParsePatch(body []byte) (map[string]any, error) {
 				return nil, invalid("feeSEK must be a whole number from 0 to %d, or null", math.MaxInt32)
 			}
 			cols["fee_sek"] = n
+		case "ownerId":
+			if isNull {
+				cols["owner_id"] = nil
+				continue
+			}
+			var id string
+			if json.Unmarshal(value, &id) != nil || !uuidPattern.MatchString(id) {
+				return nil, invalid("ownerId must be a team member's id, or null")
+			}
+			cols["owner_id"] = id
 		case "contactId":
 			if isNull {
 				cols["contact_id"] = nil

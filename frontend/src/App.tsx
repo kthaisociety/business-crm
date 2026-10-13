@@ -12,6 +12,10 @@ import {
   fetchContacts,
   fetchDeals,
   fetchMe,
+  fetchMembers,
+  addMember,
+  removeMember,
+  updateMember,
   updateCompany,
   updateContact,
   updateDeal,
@@ -26,8 +30,19 @@ import Sidebar, { MobileNav } from './components/layout/Sidebar'
 import CompaniesPage, { type CompanyActions } from './components/pages/CompaniesPage'
 import ContactsPage, { type ContactActions } from './components/pages/ContactsPage'
 import ReportsPage from './components/pages/ReportsPage'
+import TeamPage, { type TeamActions } from './components/pages/TeamPage'
 import PipelineView from './components/PipelineView'
-import { compareSemesters, currentSemester, isConfirmed, isOpen, isUnpaid, type Company, type Contact, type Deal } from './data/deals'
+import {
+  compareSemesters,
+  currentSemester,
+  isConfirmed,
+  isOpen,
+  isUnpaid,
+  type Company,
+  type Contact,
+  type Deal,
+  type Person,
+} from './data/deals'
 import { messageOf } from './format'
 import { LocalEdits } from './dealSync'
 import { useMinuteTick } from './hooks'
@@ -49,11 +64,16 @@ function matches(deal: Deal, query: string): boolean {
 
 const sumFees = (deals: Deal[]) => deals.reduce((sum, deal) => sum + (deal.feeSEK ?? 0), 0)
 
-type Data = { deals: Deal[]; companies: Company[]; contacts: Contact[] }
+type Data = { deals: Deal[]; companies: Company[]; contacts: Contact[]; members: Person[] }
 
 const fetchAll = async (signal?: AbortSignal): Promise<Data> => {
-  const [deals, companies, contacts] = await Promise.all([fetchDeals(signal), fetchCompanies(signal), fetchContacts(signal)])
-  return { deals, companies, contacts }
+  const [deals, companies, contacts, members] = await Promise.all([
+    fetchDeals(signal),
+    fetchCompanies(signal),
+    fetchContacts(signal),
+    fetchMembers(signal),
+  ])
+  return { deals, companies, contacts, members }
 }
 
 export default function App() {
@@ -144,6 +164,8 @@ export default function App() {
   const all = data?.deals ?? []
   const companies = data?.companies ?? []
   const contacts = data?.contacts ?? []
+  const members = data?.members ?? []
+  const isAdmin = user?.role === 'admin'
   // The current semester is always offered, even before it has deals.
   const semesters = [...new Set([currentSemester(), ...all.map((deal) => deal.semester)])].sort(compareSemesters)
 
@@ -156,9 +178,10 @@ export default function App() {
   const saveDeal = (id: string, patch: DealPatch) => {
     const before = all.find((deal) => deal.id === id)
     if (!before) return
-    const { contactId, ...fields } = patch
+    const { contactId, ownerId, ...fields } = patch
     const local: Partial<Deal> = { ...fields }
     if (contactId !== undefined) local.contact = contacts.find((c) => c.id === contactId) ?? null
+    if (ownerId !== undefined) local.owner = members.find((m) => m.id === ownerId) ?? null
     // The fields this edit sets locally (a contactId shows as the contact itself). They count as saving
     // from now, while queued too, so no refresh replaces them before the save is through.
     const keys = Object.keys(local) as (keyof Deal)[]
@@ -234,6 +257,20 @@ export default function App() {
     },
     remove: async (id) => {
       await deleteCompany(id)
+      await reload()
+    },
+  }
+  const teamActions: TeamActions = {
+    add: async (member) => {
+      await addMember(member)
+      await reload()
+    },
+    setRole: async (id, role) => {
+      await updateMember(id, { role })
+      await reload()
+    },
+    remove: async (id) => {
+      await removeMember(id)
       await reload()
     },
   }
@@ -327,6 +364,7 @@ export default function App() {
                 element={
                   <PipelineView
                     deals={inSemester.filter((deal) => matches(deal, query))}
+                    meId={user?.memberId}
                     onSelect={setSelectedId}
                     onMove={(id, status) => saveDeal(id, { status })}
                   />
@@ -335,6 +373,10 @@ export default function App() {
               <Route path="companies" element={<CompaniesPage companies={companies} contacts={contacts} deals={all} query={query} onSelect={openDeal} actions={companyActions} contactActions={contactActions} />} />
               <Route path="contacts" element={<ContactsPage companies={companies} contacts={contacts} deals={all} query={query} onSelect={openDeal} actions={contactActions} />} />
               <Route path="reports" element={<ReportsPage deals={all} semester={semester} onSelect={openDeal} />} />
+              <Route
+                path="team"
+                element={<TeamPage members={members} deals={all} meId={user?.memberId} isAdmin={isAdmin} actions={teamActions} />}
+              />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           )}
@@ -350,12 +392,24 @@ export default function App() {
             .sort((a, b) => compareSemesters(a.semester, b.semester))}
           onClose={() => setSelectedId(null)}
           companyContacts={contacts.filter((c) => c.companyId === selected.companyId)}
+          members={members}
+          meId={user?.memberId}
           onChange={(patch) => saveDeal(selected.id, patch)}
           onAddNote={(text) => saveNote(selected.id, text)}
           onSelect={openDeal}
         />
       )}
-      {addingLead && user && <NewLeadDialog semester={semester} companies={companies} contacts={contacts} onCreate={addLead} onClose={() => setAddingLead(false)} />}
+      {addingLead && user && (
+        <NewLeadDialog
+          semester={semester}
+          companies={companies}
+          contacts={contacts}
+          members={members}
+          meId={user.memberId}
+          onCreate={addLead}
+          onClose={() => setAddingLead(false)}
+        />
+      )}
     </div>
   )
 }

@@ -40,7 +40,16 @@ export const INVOICE_STATUSES: { id: InvoiceStatus; label: string }[] = [
   { id: 'cancelled', label: 'Cancelled' },
 ]
 
-export type Person = { id: string; name: string; email: string }
+// What a team member may do (docs/adr/0003): admins also manage the team.
+export type Role = 'admin' | 'board' | 'member'
+export const ROLES: { id: Role; label: string }[] = [
+  { id: 'admin', label: 'Admin' },
+  { id: 'board', label: 'Board' },
+  { id: 'member', label: 'Member' },
+]
+
+// A business-team member: a deal's owner or support, or someone on the Team page.
+export type Person = { id: string; name: string; email: string; role?: Role }
 
 export type Company = { id: string; name: string; website: string; notes: string }
 
