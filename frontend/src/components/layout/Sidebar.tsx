@@ -1,4 +1,5 @@
 import { BarChart3, Building2, KanbanSquare, Mail, Users } from 'lucide-react'
+import { NavLink } from 'react-router'
 import type { User } from '../../api'
 
 type Props = {
@@ -6,32 +7,27 @@ type Props = {
   userError: string | null
 }
 
-// Only the pipeline exists so far; the other tabs show what's coming.
-const tabs = [
-  { label: 'Pipeline', icon: KanbanSquare, ready: true },
-  { label: 'Companies', icon: Building2, ready: false },
-  { label: 'Contacts', icon: Users, ready: false },
-  { label: 'Reports', icon: BarChart3, ready: false },
+const pages = [
+  { label: 'Pipeline', icon: KanbanSquare, path: '/' },
+  { label: 'Companies', icon: Building2, path: '/companies' },
+  { label: 'Contacts', icon: Users, path: '/contacts' },
+  { label: 'Reports', icon: BarChart3, path: '/reports' },
 ]
+
+const linkClass = ({ isActive }: { isActive: boolean }) =>
+  `flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm ${
+    isActive ? 'bg-gray-100 font-semibold text-gray-900' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+  }`
 
 export default function Sidebar({ user, userError }: Props) {
   return (
     <aside className="hidden w-56 shrink-0 flex-col border-r border-gray-200 bg-white p-3 md:flex">
       <nav aria-label="Main" className="flex flex-col gap-0.5">
-        {tabs.map(({ label, icon: Icon, ready }) => (
-          <button
-            key={label}
-            type="button"
-            disabled={!ready}
-            aria-current={ready ? 'page' : undefined}
-            className={`flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-sm ${
-              ready ? 'bg-gray-100 font-semibold text-gray-900' : 'cursor-not-allowed text-gray-400'
-            }`}
-          >
+        {pages.map(({ label, icon: Icon, path }) => (
+          <NavLink key={path} to={path} end className={linkClass}>
             <Icon size={16} aria-hidden />
-            <span className="flex-1">{label}</span>
-            {!ready && <span className="text-[10px] font-medium">Soon</span>}
-          </button>
+            {label}
+          </NavLink>
         ))}
       </nav>
 
@@ -51,5 +47,25 @@ export default function Sidebar({ user, userError }: Props) {
         {!user && !userError && <p>Loading…</p>}
       </div>
     </aside>
+  )
+}
+
+// The sidebar is hidden on narrow screens; this row of tabs takes its place.
+export function MobileNav() {
+  return (
+    <nav aria-label="Pages" className="flex gap-1 overflow-x-auto border-b border-gray-200 bg-white px-4 py-2 md:hidden">
+      {pages.map(({ label, path }) => (
+        <NavLink
+          key={path}
+          to={path}
+          end
+          className={({ isActive }) =>
+            `shrink-0 rounded-md px-2.5 py-1 text-xs ${isActive ? 'bg-gray-100 font-semibold text-gray-900' : 'text-gray-600'}`
+          }
+        >
+          {label}
+        </NavLink>
+      ))}
+    </nav>
   )
 }

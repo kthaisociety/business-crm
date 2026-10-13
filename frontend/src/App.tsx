@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import { X } from 'lucide-react'
+import { Navigate, Route, Routes } from 'react-router'
 import { addNote, createDeal, fetchDeals, fetchMe, updateDeal, type DealPatch, type NewLeadInput, type User } from './api'
 import DealDetailDrawer from './components/drawer/DealDetailDrawer'
 import NewLeadDialog from './components/drawer/NewLeadDialog'
 import Header from './components/layout/Header'
-import Sidebar from './components/layout/Sidebar'
+import Sidebar, { MobileNav } from './components/layout/Sidebar'
+import CompaniesPage from './components/pages/CompaniesPage'
+import ContactsPage from './components/pages/ContactsPage'
+import ReportsPage from './components/pages/ReportsPage'
 import PipelineView from './components/PipelineView'
 import { compareSemesters, currentSemester, isConfirmed, isOpen, isUnpaid, type Deal } from './data/deals'
 import { useMinuteTick } from './hooks'
@@ -102,6 +106,13 @@ export default function App() {
     setSelectedId(deal.id)
   }
 
+  // Opens a deal from any page, switching to its semester so the board behind shows it.
+  const openDeal = (id: string) => {
+    const deal = all.find((d) => d.id === id)
+    if (deal) setSemester(deal.semester)
+    setSelectedId(id)
+  }
+
   const inSemester = all.filter((deal) => deal.semester === semester)
   const selected = all.find((deal) => deal.id === selectedId)
 
@@ -119,6 +130,7 @@ export default function App() {
         canAddLead={user !== null}
         onNewLead={() => setAddingLead(true)}
       />
+      <MobileNav />
       <div className="flex min-h-0 flex-1">
         <Sidebar user={user} userError={userError} />
         <main className="flex min-w-0 flex-1 flex-col">
@@ -139,18 +151,30 @@ export default function App() {
                   setLoadError(null)
                   loadDeals()
                 }}
-                className="ml-3 font-semibold underline">
+                className="ml-3 font-semibold underline"
+              >
                 Retry
               </button>
             </div>
           ) : deals === null ? (
             <p className="m-6 text-sm text-gray-500">Loading deals…</p>
           ) : (
-            <PipelineView
-              deals={inSemester.filter((deal) => matches(deal, query))}
-              onSelect={setSelectedId}
-              onMove={(id, status) => saveDeal(id, { status })}
-            />
+            <Routes>
+              <Route
+                index
+                element={
+                  <PipelineView
+                    deals={inSemester.filter((deal) => matches(deal, query))}
+                    onSelect={setSelectedId}
+                    onMove={(id, status) => saveDeal(id, { status })}
+                  />
+                }
+              />
+              <Route path="companies" element={<CompaniesPage deals={all} query={query} onSelect={openDeal} />} />
+              <Route path="contacts" element={<ContactsPage deals={all} query={query} onSelect={openDeal} />} />
+              <Route path="reports" element={<ReportsPage deals={all} semester={semester} onSelect={openDeal} />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
           )}
         </main>
       </div>
@@ -165,11 +189,7 @@ export default function App() {
           onClose={() => setSelectedId(null)}
           onChange={(patch) => saveDeal(selected.id, patch)}
           onAddNote={(text) => saveNote(selected.id, text)}
-          onSelect={(id) => {
-            const other = all.find((deal) => deal.id === id)
-            if (other) setSemester(other.semester)
-            setSelectedId(id)
-          }}
+          onSelect={openDeal}
         />
       )}
       {addingLead && user && <NewLeadDialog semester={semester} onCreate={addLead} onClose={() => setAddingLead(false)} />}

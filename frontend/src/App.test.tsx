@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
 import { stubApi, type FakeApi } from './test/fakeApi'
@@ -16,9 +17,16 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-// Renders the app and waits for the deals to load.
+const renderAt = (path = '/') =>
+  render(
+    <MemoryRouter initialEntries={[path]}>
+      <App />
+    </MemoryRouter>,
+  )
+
+// Renders the pipeline and waits for the deals to load.
 async function renderApp() {
-  render(<App />)
+  renderAt()
   await screen.findByText('Kvarnholmen AI')
 }
 
@@ -31,7 +39,7 @@ const open = (company: string) => {
 const patches = () => api.requests.filter((r) => r.method === 'PATCH')
 
 test('shows the signed-in user', async () => {
-  render(<App />)
+  renderAt()
 
   expect(await screen.findByText('Signed in as dev@kthais.com')).toBeInTheDocument()
 })
@@ -39,7 +47,7 @@ test('shows the signed-in user', async () => {
 test('shows an error when no one is signed in', async () => {
   api = stubApi({ me: async () => new Response('', { status: 401 }) })
 
-  render(<App />)
+  renderAt()
 
   expect(await screen.findByText('Loading the signed-in user failed (401)')).toBeInTheDocument()
 })
@@ -68,7 +76,7 @@ test('switching semester shows that semester’s deals', async () => {
 
 test('says so when the deals fail to load, and retries', async () => {
   api.fail('GET', /^\/api\/deals$/, 500)
-  render(<App />)
+  renderAt()
 
   expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't load deals: something went wrong (500)")
 
@@ -275,7 +283,7 @@ test('New Lead waits for the signed-in user', async () => {
 
 test('New Lead stays disabled when sign-in fails', async () => {
   api = stubApi({ me: async () => new Response('', { status: 500 }) })
-  render(<App />)
+  renderAt()
 
   await screen.findByText('Loading the signed-in user failed (500)')
   expect(screen.getByRole('button', { name: 'New Lead' })).toBeDisabled()
@@ -417,4 +425,74 @@ test('a column lights up while a deal is dragged over it', async () => {
 
   fireEvent.dragLeave(column('Signed'), { dataTransfer, relatedTarget: document.body })
   expect(column('Signed')).not.toHaveClass('ring-2')
+})
+
+const goTo = (page: string) =>
+  fireEvent.click(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: page }))
+
+test('the sidebar moves between pages and marks the current one', async () => {
+  await renderApp()
+
+  goTo('Companies')
+
+  expect(screen.getByRole('heading', { name: 'Companies' })).toBeInTheDocument()
+  expect(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Companies' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  )
+})
+
+test('an unknown page goes to the pipeline', async () => {
+  renderAt('/nope')
+
+  expect(await screen.findByText('Kvarnholmen AI')).toBeInTheDocument()
+})
+
+test('Companies groups every semester’s deals by company and opens one', async () => {
+  renderAt('/companies')
+  const granit = await screen.findByRole('button', { name: 'Granit Consulting' })
+  const row = granit.closest('tr')!
+  expect(row).toHaveTextContent('2') // deals
+  expect(row).toHaveTextContent('55,000 SEK') // 40,000 signed this semester + 15,000 last
+
+  fireEvent.click(granit)
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(`${lastSemester} · Panel discussion`) }))
+
+  expect(screen.getByRole('dialog', { name: 'Granit Consulting' })).toHaveTextContent('Panel discussion')
+  expect(screen.getByLabelText('Semester')).toHaveValue(lastSemester)
+})
+
+test('Contacts lists the people from deals, with their email', async () => {
+  renderAt('/contacts')
+
+  const lina = await screen.findByRole('button', { name: 'Lina Dahl' })
+  const row = lina.closest('tr')!
+  expect(row).toHaveTextContent('Granit Consulting')
+  expect(within(row).getByRole('link', { name: /lina\.dahl@example\.com/ })).toHaveAttribute('href', 'mailto:lina.dahl@example.com')
+
+  fireEvent.click(lina)
+  expect(screen.getByRole('dialog', { name: 'Granit Consulting' })).toBeInTheDocument()
+})
+
+test('search filters companies and contacts', async () => {
+  renderAt('/companies')
+  await screen.findByRole('button', { name: 'Granit Consulting' })
+
+  fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'lumen' } })
+
+  expect(screen.getByRole('button', { name: 'Lumen Health' })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Granit Consulting' })).not.toBeInTheDocument()
+})
+
+test('Reports sums up the semester and lists who needs a follow-up', async () => {
+  renderAt('/reports')
+
+  expect(await screen.findByRole('heading', { name: `Report · ${thisSemester}` })).toBeInTheDocument()
+  expect(screen.getByText('Win rate', { selector: 'p' }).parentElement).toHaveTextContent('67%')
+  expect(screen.getByText('In the pipeline', { selector: 'p' }).parentElement).toHaveTextContent('60,000 SEK')
+  const followUp = screen.getByRole('region', { name: 'Needs follow-up' })
+  expect(followUp).toHaveTextContent('Needs follow-up (3)')
+
+  fireEvent.click(within(followUp).getByRole('button', { name: 'Lumen Health' }))
+  expect(screen.getByRole('dialog', { name: 'Lumen Health' })).toBeInTheDocument()
 })
