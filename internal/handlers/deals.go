@@ -112,15 +112,18 @@ func addNote(store *deals.Store) gin.HandlerFunc {
 	}
 }
 
-// fail answers 400 with the reason for a bad request, 404 for an unknown deal, and 500 for anything else,
-// which is logged rather than shown.
+// fail answers 400 with the reason for a bad request, 409 for one that clashes with what's stored, 404
+// for an unknown deal, company or contact, and 500 for anything else, which is logged rather than shown.
 func fail(c *gin.Context, err error) {
 	var invalid *deals.ValidationError
+	var clash *deals.ConflictError
 	switch {
 	case errors.As(err, &invalid):
 		c.JSON(http.StatusBadRequest, gin.H{"error": invalid.Error()})
-	case errors.Is(err, deals.ErrNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"error": "deal not found"})
+	case errors.As(err, &clash):
+		c.JSON(http.StatusConflict, gin.H{"error": clash.Error()})
+	case errors.Is(err, deals.ErrNotFound), errors.Is(err, deals.ErrCompanyNotFound), errors.Is(err, deals.ErrContactNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	default:
 		log.Printf("%s %s: %v", c.Request.Method, c.Request.URL.Path, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "something went wrong"})

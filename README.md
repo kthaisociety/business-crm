@@ -49,12 +49,16 @@ The schema is SQL files in `internal/database/migrations/`, applied by the serve
 |---|---|
 | `GET /api/health` | `{"service":"business-crm","status":"healthy"}`, or 503 if the database is unreachable |
 | `GET /api/me` | the signed-in user: `{"sub":"…","email":"…","name":"…"}`; 401 if no one is |
-| `GET /api/deals` | every deal, with owner, support and timeline |
-| `POST /api/deals` | adds a lead owned by the signed-in user: `{company, dealType, semester, contactName, contactEmail, contactRole, nextStep}` |
-| `PATCH /api/deals/:id` | changes `status`, `nextStep`, `nextStepDue`, `feeSEK` or `invoiceStatus`; `null` clears a nullable one |
+| `GET /api/deals` | every deal, with company, contact, owner, support and timeline |
+| `POST /api/deals` | adds a lead owned by the signed-in user: `{companyId}` or a new `{company}` name, optionally `{contactId}` or a new `{contact: {name, email, role}}`, and `{dealType, semester, nextStep}` |
+| `PATCH /api/deals/:id` | changes `status`, `nextStep`, `nextStepDue`, `feeSEK`, `invoiceStatus` or `contactId`; `null` clears a nullable one |
 | `POST /api/deals/:id/notes` | adds a quick note to the deal's timeline: `{body}` |
+| `GET`, `POST /api/companies`; `PATCH`, `DELETE /api/companies/:id` | companies: `{name, website, notes}`; names are unique ignoring case |
+| `GET`, `POST /api/contacts`; `PATCH`, `DELETE /api/contacts/:id` | contacts: `{companyId, name, email, role}`; emails are unique |
 
-Every route but health needs a signed-in user. A bad request gets a 400 whose `error` says what was wrong.
+Every route but health needs a signed-in user. A bad request gets a 400 whose `error` says what was wrong; one
+that clashes with what's stored gets a 409: a taken name or email, or deleting a company or contact that deals
+point at.
 
 ## Configuration
 

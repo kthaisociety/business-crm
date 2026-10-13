@@ -2,6 +2,7 @@ package deals_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -21,8 +22,8 @@ func newStore(t *testing.T) *deals.Store {
 func addLead(t *testing.T, s *deals.Store, company string) deals.View {
 	t.Helper()
 	d, err := s.Create(context.Background(), deals.NewLead{
-		Company: company, DealType: "Event", Semester: "HT 2026",
-		ContactName: "Kim Ek", ContactEmail: "kim@example.com", ContactRole: "Head of Talent", NextStep: "Send intro email",
+		Company: company, DealType: "Event", Semester: "HT 2026", NextStep: "Send intro email",
+		Contact: &deals.ContactInput{Name: "Kim Ek", Email: "kim." + strings.ToLower(strings.Fields(company)[0]) + "@example.com", Role: "Head of Talent"},
 	}, alva)
 	require.NoError(t, err)
 	return d
@@ -40,7 +41,11 @@ func TestCreateAddsALeadOwnedByTheMemberWhoAddedIt(t *testing.T) {
 	assert.Equal(t, "Unclear", d.Audience)
 	require.NotNil(t, d.Owner)
 	assert.Equal(t, "alva@example.com", d.Owner.Email)
-	assert.Equal(t, &deals.ContactView{Name: "Kim Ek", Email: "kim@example.com", Role: "Head of Talent"}, d.Contact)
+	require.NotNil(t, d.Contact)
+	assert.Equal(t, "Kim Ek", d.Contact.Name)
+	assert.Equal(t, "kim.nordljus@example.com", d.Contact.Email)
+	assert.Equal(t, "Head of Talent", d.Contact.Role)
+	assert.Equal(t, d.CompanyID, d.Contact.CompanyID)
 	require.Len(t, d.Activities, 1)
 	assert.Equal(t, "Added as a lead", d.Activities[0].Title)
 	assert.Empty(t, d.Support)

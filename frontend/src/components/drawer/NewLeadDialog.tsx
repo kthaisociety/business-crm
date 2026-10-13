@@ -1,95 +1,108 @@
-import { useRef, useState, type FormEvent } from 'react'
-import { X } from 'lucide-react'
+import { useState } from 'react'
 import type { NewLeadInput } from '../../api'
-import { DEAL_TYPES, type DealType } from '../../data/deals'
-import { useModal } from '../../hooks'
+import { DEAL_TYPES, type Company, type Contact, type DealType } from '../../data/deals'
+import FormDialog, { inputClass } from '../dialogs/FormDialog'
 
 type Props = {
   semester: string
-  // Resolves once the lead is saved; the form stays open with the error if it rejects.
+  companies: Company[]
+  contacts: Contact[]
   onCreate: (lead: Omit<NewLeadInput, 'semester'>) => Promise<void>
   onClose: () => void
 }
 
-const input =
-  'mt-1 w-full rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs text-gray-800 focus:border-indigo-300 focus:outline-none'
+const NO_CONTACT = ''
+const NEW_CONTACT = 'new'
 
-export default function NewLeadDialog({ semester, onCreate, onClose }: Props) {
-  const [company, setCompany] = useState('')
+// Adds a lead. Typing a company that exists picks it, along with its contacts; any other name adds a new
+// company with the lead.
+export default function NewLeadDialog({ semester, companies, contacts, onCreate, onClose }: Props) {
+  const [companyName, setCompanyName] = useState('')
   const [dealType, setDealType] = useState<DealType>('Event')
+  const [choice, setChoice] = useState<string | null>(null) // null: the default for the company
   const [contactName, setContactName] = useState('')
   const [contactEmail, setContactEmail] = useState('')
   const [contactRole, setContactRole] = useState('')
   const [nextStep, setNextStep] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
-  // The dialog stays open while saving: closing it then would let a late result close a newer form.
-  const close = () => {
-    if (!saving) onClose()
-  }
-  const dialog = useRef<HTMLFormElement>(null)
-  useModal(dialog, close)
+  const typed = companyName.trim()
+  const company = companies.find((c) => c.name.toLowerCase() === typed.toLowerCase())
+  const companyContacts = company ? contacts.filter((c) => c.companyId === company.id) : []
+  // A contact picked at one company doesn't carry over when the company changes.
+  const valid = choice === NO_CONTACT || choice === NEW_CONTACT || companyContacts.some((c) => c.id === choice)
+  const contactChoice = choice !== null && valid ? choice : companyContacts.length ? NO_CONTACT : NEW_CONTACT
 
-  const submit = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!company.trim() || saving) return
-    setSaving(true)
-    setError(null)
-    try {
-      await onCreate({
-        company: company.trim(),
-        dealType,
-        contactName: contactName.trim(),
-        contactEmail: contactEmail.trim(),
-        contactRole: contactRole.trim(),
-        nextStep: nextStep.trim(),
-      })
-    } catch (err) {
-      setError(`Couldn't add the lead: ${err instanceof Error ? err.message : String(err)}`)
-      setSaving(false)
+  const submit = async () => {
+    const lead: Omit<NewLeadInput, 'semester'> = company
+      ? { companyId: company.id, dealType, nextStep: nextStep.trim() }
+      : { company: typed, dealType, nextStep: nextStep.trim() }
+    if (contactChoice === NEW_CONTACT && (contactName.trim() || contactEmail.trim())) {
+      lead.contact = { name: contactName.trim(), email: contactEmail.trim(), role: contactRole.trim() }
+    } else if (contactChoice !== NEW_CONTACT && contactChoice !== NO_CONTACT) {
+      lead.contactId = contactChoice
     }
+    await onCreate(lead)
   }
 
   return (
-    <div className="fixed inset-0 z-40 flex items-start justify-center p-4 pt-24">
-      <button type="button" aria-label="Close new lead" tabIndex={-1} onClick={close} className="absolute inset-0 bg-gray-900/20" />
-      <form
-        ref={dialog}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-label="New lead"
-        onSubmit={submit}
-        className="relative w-full max-w-sm rounded-xl focus:outline-none border border-gray-200 bg-white p-5 shadow-xl"
-      >
-        <div className="flex items-center justify-between">
-          <h2 className="font-display text-sm font-bold text-gray-900">New lead · {semester}</h2>
-          <button type="button" onClick={close} aria-label="Close" className="rounded-md p-1 text-gray-400 hover:bg-gray-100">
-            <X size={16} aria-hidden />
-          </button>
-        </div>
-        <div className="mt-4 space-y-3 text-xs font-medium text-gray-600">
-          <label className="block">
-            Company
-            <input required data-autofocus value={company} onChange={(e) => setCompany(e.target.value)} className={input} />
-          </label>
-          <label className="block">
-            Deal type
-            <select value={dealType} onChange={(e) => setDealType(e.target.value as DealType)} className={input}>
-              {DEAL_TYPES.map((t) => (
-                <option key={t}>{t}</option>
-              ))}
-            </select>
-          </label>
+    <FormDialog title={`New lead · ${semester}`} submitLabel="Add lead" onSubmit={submit} onClose={onClose}>
+      <div>
+        <label className="block">
+          Company
+          <input
+            required
+            data-autofocus
+            list="company-names"
+            aria-describedby="company-hint"
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            className={inputClass}
+          />
+        </label>
+        <datalist id="company-names">
+          {companies.map((c) => (
+            <option key={c.id} value={c.name} />
+          ))}
+        </datalist>
+        <p id="company-hint" className="mt-1 text-[11px] font-normal text-gray-400">
+          {!typed
+            ? 'Pick one from the list, or type a new name'
+            : company
+              ? `Existing company, ${companyContacts.length} ${companyContacts.length === 1 ? 'contact' : 'contacts'}`
+              : `${typed} is new and will be added`}
+        </p>
+      </div>
+      <label className="block">
+        Deal type
+        <select value={dealType} onChange={(e) => setDealType(e.target.value as DealType)} className={inputClass}>
+          {DEAL_TYPES.map((t) => (
+            <option key={t}>{t}</option>
+          ))}
+        </select>
+      </label>
+      <label className="block">
+        Contact
+        <select value={contactChoice} onChange={(e) => setChoice(e.target.value)} className={inputClass}>
+          <option value={NO_CONTACT}>No contact yet</option>
+          {companyContacts.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name || c.email}
+              {c.role ? ` · ${c.role}` : ''}
+            </option>
+          ))}
+          <option value={NEW_CONTACT}>New contact…</option>
+        </select>
+      </label>
+      {contactChoice === NEW_CONTACT && (
+        <div className="space-y-3 rounded-lg border border-gray-100 bg-gray-50/60 p-3">
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
               Contact name
-              <input value={contactName} onChange={(e) => setContactName(e.target.value)} className={input} />
+              <input value={contactName} onChange={(e) => setContactName(e.target.value)} className={inputClass} />
             </label>
             <label className="block">
               Contact email
-              <input type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} className={input} />
+              <input type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} className={inputClass} />
             </label>
           </div>
           <label className="block">
@@ -97,24 +110,16 @@ export default function NewLeadDialog({ semester, onCreate, onClose }: Props) {
             <input
               value={contactRole}
               onChange={(e) => setContactRole(e.target.value)}
-              className={input}
+              className={inputClass}
               placeholder="e.g. Talent Acquisition Lead"
             />
           </label>
-          <label className="block">
-            Next step
-            <input value={nextStep} onChange={(e) => setNextStep(e.target.value)} className={input} placeholder="e.g. Send intro email" />
-          </label>
         </div>
-        {error && (
-          <p role="alert" className="mt-4 text-xs text-red-600">
-            {error}
-          </p>
-        )}
-        <button type="submit" disabled={saving} className="mt-5 w-full rounded-lg bg-indigo-600 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">
-          {saving ? 'Adding…' : 'Add lead'}
-        </button>
-      </form>
-    </div>
+      )}
+      <label className="block">
+        Next step
+        <input value={nextStep} onChange={(e) => setNextStep(e.target.value)} className={inputClass} placeholder="e.g. Send intro email" />
+      </label>
+    </FormDialog>
   )
 }

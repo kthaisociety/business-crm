@@ -1,5 +1,5 @@
-// Package deals stores the deal log (CONTEXT.md): deals, the members who own and support them, and each
-// deal's timeline of activities.
+// Package deals stores the deal log (CONTEXT.md): deals, the companies and contacts they're with, the
+// members who own and support them, and each deal's timeline of activities.
 package deals
 
 import (
@@ -8,7 +8,26 @@ import (
 	"time"
 )
 
-// GORM models, one per table in migrations/00001_create_deals.sql (docs/pcr/0006).
+// GORM models, one per table in internal/database/migrations (docs/pcr/0006).
+
+type Company struct {
+	ID        string `gorm:"type:uuid;default:gen_random_uuid()"`
+	Name      string
+	Website   string
+	Notes     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type Contact struct {
+	ID        string `gorm:"type:uuid;default:gen_random_uuid()"`
+	CompanyID string
+	Name      string
+	Email     string
+	Role      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
 
 type Member struct {
 	ID        string `gorm:"type:uuid;default:gen_random_uuid()"`
@@ -19,7 +38,10 @@ type Member struct {
 
 type Deal struct {
 	ID            string `gorm:"type:uuid;default:gen_random_uuid()"`
-	Company       string
+	CompanyID     string
+	Company       *Company `gorm:"foreignKey:CompanyID"`
+	ContactID     *string
+	Contact       *Contact `gorm:"foreignKey:ContactID"`
 	DealType      string
 	EventType     string
 	Audience      string
@@ -31,9 +53,6 @@ type Deal struct {
 	OwnerID       *string
 	Owner         *Member  `gorm:"foreignKey:OwnerID"`
 	Support       []Member `gorm:"many2many:deal_support;joinForeignKey:DealID;joinReferences:MemberID"`
-	ContactName   string
-	ContactEmail  string
-	ContactRole   string
 	NextStep      string
 	NextStepDue   *Date
 	FeeSEK        *int `gorm:"column:fee_sek"`
@@ -97,10 +116,19 @@ type MemberView struct {
 	Email string `json:"email"`
 }
 
+type CompanyView struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Website string `json:"website"`
+	Notes   string `json:"notes"`
+}
+
 type ContactView struct {
-	Name  string `json:"name"`
-	Email string `json:"email"`
-	Role  string `json:"role"`
+	ID        string `json:"id"`
+	CompanyID string `json:"companyId"`
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	Role      string `json:"role"`
 }
 
 type LinksView struct {
@@ -121,7 +149,8 @@ type ActivityView struct {
 
 type View struct {
 	ID            string         `json:"id"`
-	Company       string         `json:"company"`
+	CompanyID     string         `json:"companyId"`
+	Company       string         `json:"company"` // the company's name
 	DealType      string         `json:"dealType"`
 	EventType     string         `json:"eventType"`
 	Audience      string         `json:"audience"`
@@ -145,6 +174,14 @@ type View struct {
 	CreatedAt     string         `json:"createdAt"`
 }
 
+func viewOfCompany(c Company) CompanyView {
+	return CompanyView{ID: c.ID, Name: c.Name, Website: c.Website, Notes: c.Notes}
+}
+
+func viewOfContact(c Contact) ContactView {
+	return ContactView{ID: c.ID, CompanyID: c.CompanyID, Name: c.Name, Email: c.Email, Role: c.Role}
+}
+
 func viewOfMember(m Member) MemberView {
 	return MemberView{ID: m.ID, Name: m.Name, Email: m.Email}
 }
@@ -164,7 +201,7 @@ func viewOfActivity(a Activity) ActivityView {
 func viewOf(d Deal) View {
 	v := View{
 		ID:            d.ID,
-		Company:       d.Company,
+		CompanyID:     d.CompanyID,
 		DealType:      d.DealType,
 		EventType:     d.EventType,
 		Audience:      d.Audience,
@@ -192,8 +229,12 @@ func viewOf(d Deal) View {
 	for _, m := range d.Support {
 		v.Support = append(v.Support, viewOfMember(m))
 	}
-	if d.ContactName != "" || d.ContactEmail != "" {
-		v.Contact = &ContactView{Name: d.ContactName, Email: d.ContactEmail, Role: d.ContactRole}
+	if d.Company != nil {
+		v.Company = d.Company.Name
+	}
+	if d.Contact != nil {
+		contact := viewOfContact(*d.Contact)
+		v.Contact = &contact
 	}
 	for _, a := range d.Activities {
 		v.Activities = append(v.Activities, viewOfActivity(a))

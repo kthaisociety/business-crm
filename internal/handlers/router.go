@@ -38,6 +38,7 @@ func NewRouter(d Deps) *gin.Engine {
 	signedIn.POST("/deals", createDeal(d.Deals))
 	signedIn.PATCH("/deals/:id", updateDeal(d.Deals))
 	signedIn.POST("/deals/:id/notes", addNote(d.Deals))
+	registerCompanies(signedIn, d.Deals)
 
 	r.NoRoute(frontend(d.Frontend))
 	return r

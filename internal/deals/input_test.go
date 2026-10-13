@@ -50,15 +50,20 @@ func TestParsePatchRejectsBadInput(t *testing.T) {
 }
 
 func TestNewLeadValidation(t *testing.T) {
-	valid := NewLead{Company: "  Nordljus AB ", DealType: "Event", Semester: "HT 2026", ContactEmail: "kim@example.com"}
+	valid := NewLead{Company: "  Nordljus AB ", DealType: "Event", Semester: "HT 2026", Contact: &ContactInput{Email: " kim@example.com "}}
 	require.NoError(t, valid.validate())
 	assert.Equal(t, "Nordljus AB", valid.Company)
+	assert.Equal(t, "kim@example.com", valid.Contact.Email)
 
+	someID := "00000000-0000-0000-0000-000000000001"
 	for name, lead := range map[string]NewLead{
-		"no company":    {DealType: "Event", Semester: "HT 2026"},
-		"bad deal type": {Company: "X", DealType: "Sponsorship", Semester: "HT 2026"},
-		"bad semester":  {Company: "X", DealType: "Event", Semester: "Autumn 2026"},
-		"bad email":     {Company: "X", DealType: "Event", Semester: "HT 2026", ContactEmail: "kim"},
+		"no company":           {DealType: "Event", Semester: "HT 2026"},
+		"bad company id":       {CompanyID: "42", DealType: "Event", Semester: "HT 2026"},
+		"bad deal type":        {Company: "X", DealType: "Sponsorship", Semester: "HT 2026"},
+		"bad semester":         {Company: "X", DealType: "Event", Semester: "Autumn 2026"},
+		"bad email":            {Company: "X", DealType: "Event", Semester: "HT 2026", Contact: &ContactInput{Email: "kim"}},
+		"empty contact":        {Company: "X", DealType: "Event", Semester: "HT 2026", Contact: &ContactInput{Role: "CTO"}},
+		"two kinds of contact": {Company: "X", DealType: "Event", Semester: "HT 2026", ContactID: someID, Contact: &ContactInput{Name: "Kim"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			var invalid *ValidationError
@@ -81,4 +86,41 @@ func TestTheLargestFeeFitsTheColumn(t *testing.T) {
 	cols, err := ParsePatch([]byte(`{"feeSEK":2147483647}`))
 	require.NoError(t, err)
 	assert.Equal(t, map[string]any{"fee_sek": 2147483647}, cols)
+}
+
+func TestParsePatchSetsAndClearsTheContact(t *testing.T) {
+	cols, err := ParsePatch([]byte(`{"contactId":"00000000-0000-0000-0000-000000000001"}`))
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"contact_id": "00000000-0000-0000-0000-000000000001"}, cols)
+
+	cols, err = ParsePatch([]byte(`{"contactId":null}`))
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"contact_id": nil}, cols)
+
+	_, err = ParsePatch([]byte(`{"contactId":"kim"}`))
+	var invalid *ValidationError
+	assert.ErrorAs(t, err, &invalid)
+}
+
+func TestCompanyAndContactPatches(t *testing.T) {
+	cols, err := ParseCompanyPatch([]byte(`{"name":" Granit AB ","website":"https://example.com"}`))
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"name": "Granit AB", "website": "https://example.com"}, cols)
+
+	cols, err = ParseContactPatch([]byte(`{"role":"CTO","email":"kim@example.com"}`))
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"role": "CTO", "email": "kim@example.com"}, cols)
+
+	for _, bad := range []func() error{
+		func() error { _, err := ParseCompanyPatch([]byte(`{"name":"  "}`)); return err },
+		func() error { _, err := ParseCompanyPatch([]byte(`{"id":"x"}`)); return err },
+		func() error { _, err := ParseContactPatch([]byte(`{"email":"kim"}`)); return err },
+		func() error { _, err := ParseContactPatch([]byte(`{"companyId":"42"}`)); return err },
+		func() error { _, err := ParseContactPatch([]byte(`{"name":3}`)); return err },
+		func() error { _, err := ParseCompanyPatch([]byte(`{"website":null}`)); return err },
+		func() error { _, err := ParseContactPatch([]byte(`{"role":null}`)); return err },
+	} {
+		var invalid *ValidationError
+		assert.ErrorAs(t, bad(), &invalid)
+	}
 }

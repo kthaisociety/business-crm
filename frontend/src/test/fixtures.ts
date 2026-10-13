@@ -1,7 +1,7 @@
 // Made-up deals for frontend tests (docs/pcr/0005): fictional companies and people, @example.com emails,
 // invented fees. Dates are relative to today, so follow-up nudges look the same whenever tests run.
 // cmd/seed has the same deals for local development.
-import { DAY, currentSemester, today, type Activity, type Deal, type Person } from '../data/deals'
+import { DAY, currentSemester, today, type Activity, type Company, type Contact, type Deal, type Person } from '../data/deals'
 
 // Semesters relative to today, so the current one always has the open deals.
 const previous = (semester: string) => {
@@ -49,7 +49,11 @@ const note = (id: string, title: string, at: string, body = ''): Activity => ({
   body,
 })
 
-export const fixtureDeals: Deal[] = [
+// Deals as written below: company by name and contact by details. The companies and contacts tables are
+// worked out from them at the bottom, with stable ids.
+type RawDeal = Omit<Deal, 'companyId' | 'contact'> & { contact: Omit<Contact, 'id' | 'companyId'> | null }
+
+const rawDeals: RawDeal[] = [
   {
     ...base,
     id: 'fjallbacka',
@@ -343,3 +347,26 @@ export const fixtureDeals: Deal[] = [
     activities: [note('arkipelag-1', 'Payment received', '2025-11-01T09:00:00Z')],
   },
 ]
+
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-')
+
+export const fixtureCompanies: Company[] = [...new Set(rawDeals.map((d) => d.company))].map((name) => ({
+  id: `c-${slug(name)}`,
+  name,
+  website: '',
+  notes: '',
+}))
+
+export const fixtureContacts: Contact[] = []
+export const fixtureDeals: Deal[] = rawDeals.map((raw) => {
+  const companyId = `c-${slug(raw.company)}`
+  let contact: Contact | null = null
+  if (raw.contact) {
+    contact = fixtureContacts.find((c) => c.email === raw.contact!.email) ?? null
+    if (!contact) {
+      contact = { id: `p-${slug(raw.contact.email || raw.contact.name)}`, companyId, ...raw.contact }
+      fixtureContacts.push(contact)
+    }
+  }
+  return { ...raw, companyId, contact }
+})
