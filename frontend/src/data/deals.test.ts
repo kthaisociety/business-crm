@@ -1,9 +1,10 @@
 import { expect, test } from 'vitest'
-import { calendarDaysBetween, compareSemesters, isUnpaid, mockDeals, nudgeFor, type Deal } from './mockDeals'
+import { fixtureDeals } from '../test/fixtures'
+import { calendarDaysBetween, compareSemesters, currentSemester, isUnpaid, nudgeFor, type Deal } from './deals'
 
 const now = new Date('2026-10-13T12:00:00').getTime()
 const deal = (patch: Partial<Deal>): Deal => ({
-  ...mockDeals[0],
+  ...fixtureDeals[0],
   status: 'discussing',
   nextStepDue: null,
   activities: [{ id: 'a', type: 'note', source: 'manual', title: '', body: '', timestamp: '2026-10-12T12:00:00' }],
@@ -50,4 +51,11 @@ test('a confirmed fee is unpaid until marked paid or cancelled', () => {
   expect(isUnpaid(signed('paid'))).toBe(false)
   expect(isUnpaid(signed('cancelled'))).toBe(false)
   expect(isUnpaid(deal({ status: 'discussing', feeSEK: 20_000, invoiceStatus: null }))).toBe(false)
+})
+
+test('the current semester is VT from January and HT from July', () => {
+  expect(currentSemester(new Date(2026, 0, 10))).toBe('VT 2026')
+  expect(currentSemester(new Date(2026, 5, 30))).toBe('VT 2026')
+  expect(currentSemester(new Date(2026, 6, 1))).toBe('HT 2026')
+  expect(currentSemester(new Date(2026, 11, 31))).toBe('HT 2026')
 })

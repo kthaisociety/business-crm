@@ -67,3 +67,15 @@ export function useMinuteTick() {
     }
   }, [])
 }
+
+// A field's text while it's being edited, saved only when editing ends. It follows `value` whenever that
+// changes from outside, e.g. when a failed save puts the old value back.
+export function useDraft(value: string): [string, (draft: string) => void] {
+  const [draft, setDraft] = useState(value)
+  const [seen, setSeen] = useState(value)
+  if (value !== seen) {
+    setSeen(value)
+    setDraft(value)
+  }
+  return [draft, setDraft]
+}

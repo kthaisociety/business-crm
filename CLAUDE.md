@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-business-crm: the KTHAIS business team's CRM. Just scaffolded: no CRM features yet. Sign-in is simulated
+business-crm: the KTHAIS business team's CRM: the deal log as a board and a list. Sign-in is simulated
 until identity-service is live (PCR 0005). One repo, one image: a Go server (Gin, GORM, Postgres) serves
 the API under `/api` and an embedded Vite + React frontend everywhere else.
 
@@ -8,6 +8,7 @@ the API under `/api` and an embedded Vite + React frontend everywhere else.
 
 - Local Postgres: `docker compose up -d`
 - Config: `cp .env.example .env`
+- Made-up data for local dev: `go run ./cmd/seed` (once, on an empty database)
 - Backend: `go run ./cmd/server` (on `127.0.0.1:8002`)
 - Frontend dev: `cd frontend && npm install && npm run dev` (Vite on 5174, proxies `/api` to 8002)
 - All checks: `make test` (needs `docker compose up -d`, and `npm install` in `frontend/` once)
@@ -15,9 +16,10 @@ the API under `/api` and an embedded Vite + React frontend everywhere else.
 
 ## Layout
 
-- `cmd/server`: wiring and startup
+- `cmd/server`: wiring and startup; `cmd/seed`: made-up deals for local dev
 - `internal/config`: env, validated at boot
 - `internal/auth`: who is signed in; the dev user until identity-service (PCR 0005)
+- `internal/deals`: the deal log: GORM models, validation and queries
 - `internal/handlers`: `/api` routes, and the frontend for every other path
 - `internal/database`: Postgres connection and migrations (`migrations/*.sql`, applied at startup)
 - `frontend/`: the frontend (Vite, React, TypeScript, Tailwind); `frontend/embed.go` embeds `frontend/dist`

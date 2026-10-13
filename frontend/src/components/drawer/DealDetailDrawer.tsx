@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react'
 import { ExternalLink, Mail, MessageSquare, StickyNote, Star, Users, X } from 'lucide-react'
 import {
   INVOICE_STATUSES,
@@ -11,9 +11,10 @@ import {
   type Deal,
   type InvoiceStatus,
   type Status,
-} from '../../data/mockDeals'
+} from '../../data/deals'
 import { formatDate, formatDateRange } from '../../format'
-import { useModal } from '../../hooks'
+import type { DealPatch } from '../../api'
+import { useDraft, useModal } from '../../hooks'
 import { DealTypeBadge, NudgeBadge } from '../badges'
 import OwnerAvatar from '../OwnerAvatar'
 
@@ -21,8 +22,8 @@ type Props = {
   deal: Deal
   otherDeals: Deal[] // earlier or parallel deals with the same company
   onClose: () => void
-  onChange: (patch: Partial<Deal>) => void
-  onAddNote: (text: string) => void
+  onChange: (patch: DealPatch) => void
+  onAddNote: (text: string) => Promise<void>
   onSelect: (id: string) => void
 }
 
@@ -47,16 +48,49 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 
 export default function DealDetailDrawer({ deal, otherDeals, onClose, onChange, onAddNote, onSelect }: Props) {
   const [note, setNote] = useState('')
+  const [savingNote, setSavingNote] = useState(false)
+  const [noteError, setNoteError] = useState<string | null>(null)
+  const [nextStep, setNextStep] = useDraft(deal.nextStep)
+  const [fee, setFee] = useDraft(deal.feeSEK === null ? '' : String(deal.feeSEK))
 
   const dialog = useRef<HTMLElement>(null)
   useModal(dialog, onClose)
 
-  const saveNote = (e: FormEvent) => {
+  const saveNote = async (e: FormEvent) => {
     e.preventDefault()
     const text = note.trim()
-    if (!text) return
-    onAddNote(text)
-    setNote('')
+    if (!text || savingNote) return
+    setSavingNote(true)
+    setNoteError(null)
+    try {
+      await onAddNote(text)
+      setNote('')
+    } catch (err) {
+      setNoteError(`Couldn't save the note: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setSavingNote(false)
+    }
+  }
+
+  // Text fields save when you leave them or press Enter, not on every keystroke.
+  const saveNextStep = () => {
+    if (nextStep !== deal.nextStep) onChange({ nextStep })
+  }
+  const saveFee = () => {
+    if (fee === '') {
+      if (deal.feeSEK !== null) onChange({ feeSEK: null })
+      return
+    }
+    const value = Number(fee)
+    // A fee is a whole number of 0 or more; anything else goes back to the saved fee.
+    if (!Number.isInteger(value) || value < 0) {
+      setFee(deal.feeSEK === null ? '' : String(deal.feeSEK))
+      return
+    }
+    if (value !== deal.feeSEK) onChange({ feeSEK: value })
+  }
+  const blurOnEnter = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') e.currentTarget.blur()
   }
 
   const nudge = nudgeFor(deal)
@@ -136,8 +170,10 @@ export default function DealDetailDrawer({ deal, otherDeals, onClose, onChange, 
             </label>
             <input
               id="next-step"
-              value={deal.nextStep}
-              onChange={(e) => onChange({ nextStep: e.target.value })}
+              value={nextStep}
+              onChange={(e) => setNextStep(e.target.value)}
+              onBlur={saveNextStep}
+              onKeyDown={blurOnEnter}
               placeholder="What happens next?"
               className={`${field} mt-2`}
             />
@@ -186,14 +222,11 @@ export default function DealDetailDrawer({ deal, otherDeals, onClose, onChange, 
                 aria-label="Fee (SEK)"
                 min={0}
                 step={1000}
-                value={deal.feeSEK ?? ''}
+                value={fee}
                 placeholder="Not agreed"
-                onChange={(e) => {
-                  if (e.target.value === '') return onChange({ feeSEK: null })
-                  const fee = Number(e.target.value)
-                  // A fee can't be negative; ignore the keystroke rather than skew the totals.
-                  if (Number.isFinite(fee) && fee >= 0) onChange({ feeSEK: fee })
-                }}
+                onChange={(e) => setFee(e.target.value)}
+                onBlur={saveFee}
+                onKeyDown={blurOnEnter}
                 className={`${field} w-32`}
               />
             </Row>
@@ -266,13 +299,18 @@ export default function DealDetailDrawer({ deal, otherDeals, onClose, onChange, 
               placeholder="What happened? Call, reply, next step…"
               className="mt-1.5 w-full resize-none rounded-lg border border-gray-200 p-2.5 text-xs text-gray-800 placeholder-gray-400 focus:border-indigo-300 focus:outline-none"
             />
+            {noteError && (
+              <p role="alert" className="mt-1 text-xs text-red-600">
+                {noteError}
+              </p>
+            )}
             <div className="mt-1.5 flex justify-end">
               <button
                 type="submit"
-                disabled={!note.trim()}
+                disabled={!note.trim() || savingNote}
                 className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-40"
               >
-                Save Note
+                {savingNote ? 'Saving…' : 'Save Note'}
               </button>
             </div>
           </form>

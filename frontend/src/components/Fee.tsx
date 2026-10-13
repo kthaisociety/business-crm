@@ -1,4 +1,4 @@
-import type { Deal } from '../data/mockDeals'
+import type { Deal } from '../data/deals'
 import { formatSEK } from '../format'
 
 export default function Fee({ deal }: { deal: Deal }) {

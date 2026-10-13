@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { KanbanSquare, List } from 'lucide-react'
-import { DEAL_TYPES, nudgeFor, type Deal, type DealType } from '../data/mockDeals'
+import { DEAL_TYPES, nudgeFor, type Deal, type DealType } from '../data/deals'
 import KanbanBoard from './kanban/KanbanBoard'
 import DealTable from './list/DealTable'
 

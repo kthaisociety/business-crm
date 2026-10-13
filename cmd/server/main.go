@@ -15,6 +15,7 @@ import (
 	"github.com/kthaisociety/business-crm/frontend"
 	"github.com/kthaisociety/business-crm/internal/config"
 	"github.com/kthaisociety/business-crm/internal/database"
+	"github.com/kthaisociety/business-crm/internal/deals"
 	"github.com/kthaisociety/business-crm/internal/handlers"
 )
 
@@ -35,7 +36,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// Connected but holding nothing yet: tables arrive with the first feature that stores data.
 	db, err := database.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatal(err)
@@ -48,6 +48,7 @@ func main() {
 		PingDB:   func(ctx context.Context) error { return database.Ping(ctx, db) },
 		Frontend: frontend.Dist(),
 		DevUser:  cfg.DevUser(),
+		Deals:    deals.NewStore(db),
 	})
 
 	srv := &http.Server{

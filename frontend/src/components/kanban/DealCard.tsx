@@ -1,5 +1,5 @@
 import { ArrowRight } from 'lucide-react'
-import { nudgeFor, type Deal } from '../../data/mockDeals'
+import { nudgeFor, type Deal } from '../../data/deals'
 import { formatDate, formatDateRange } from '../../format'
 import { DealTypeBadge, InvoiceBadge, NudgeBadge } from '../badges'
 import OwnerAvatar from '../OwnerAvatar'

@@ -1,4 +1,4 @@
-import { STATUSES, type Deal } from '../../data/mockDeals'
+import { STATUSES, type Deal } from '../../data/deals'
 import KanbanColumn from './KanbanColumn'
 
 type Props = {

@@ -1,14 +1,13 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
+import { stubApi, type FakeApi } from './test/fakeApi'
+import { lastSemester, thisSemester } from './test/fixtures'
+
+let api: FakeApi
 
 beforeEach(() => {
-  vi.stubGlobal(
-    'fetch',
-    vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ sub: 'dev', email: 'dev@kthais.com', name: 'Dev User' })),
-    ),
-  )
+  api = stubApi()
 })
 
 afterEach(() => {
@@ -17,12 +16,19 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+// Renders the app and waits for the deals to load.
+async function renderApp() {
+  render(<App />)
+  await screen.findByText('Kvarnholmen AI')
+}
+
 const column = (label: string) => screen.getByRole('region', { name: label })
 const card = (company: string) => within(screen.getByRole('main')).getByRole('button', { name: new RegExp(company) })
 const open = (company: string) => {
   fireEvent.click(card(company))
   return screen.getByRole('dialog', { name: company })
 }
+const patches = () => api.requests.filter((r) => r.method === 'PATCH')
 
 test('shows the signed-in user', async () => {
   render(<App />)
@@ -31,17 +37,17 @@ test('shows the signed-in user', async () => {
 })
 
 test('shows an error when no one is signed in', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })))
+  api = stubApi({ me: async () => new Response('', { status: 401 }) })
 
   render(<App />)
 
   expect(await screen.findByText('Loading the signed-in user failed (401)')).toBeInTheDocument()
 })
 
-test('shows the latest semester by status, with its totals', () => {
-  render(<App />)
+test('shows the current semester by status, with its totals', async () => {
+  await renderApp()
 
-  expect(screen.getByLabelText('Semester')).toHaveValue('HT 2026')
+  expect(screen.getByLabelText('Semester')).toHaveValue(thisSemester)
   expect(within(column('Agreement')).getByText('Kvarnholmen AI')).toBeInTheDocument()
   expect(within(column('Signed')).getByText('Granit Consulting')).toBeInTheDocument()
   expect(screen.queryByText('Polar Systems')).not.toBeInTheDocument()
@@ -50,47 +56,67 @@ test('shows the latest semester by status, with its totals', () => {
   expect(screen.getByText('Unpaid:')).toHaveTextContent('Unpaid: 40,000 SEK')
 })
 
-test('switching semester shows that semester’s deals', () => {
-  render(<App />)
+test('switching semester shows that semester’s deals', async () => {
+  await renderApp()
 
-  fireEvent.change(screen.getByLabelText('Semester'), { target: { value: 'VT 2026' } })
+  fireEvent.change(screen.getByLabelText('Semester'), { target: { value: lastSemester } })
 
   expect(within(column('Finished')).getByText('Polar Systems')).toBeInTheDocument()
   expect(screen.queryByText('Kvarnholmen AI')).not.toBeInTheDocument()
   expect(screen.getByText('Unpaid:')).toHaveTextContent('Unpaid: 30,000 SEK')
 })
 
-test('nudges overdue next steps and inactive deals', () => {
+test('says so when the deals fail to load, and retries', async () => {
+  api.fail('GET', /^\/api\/deals$/, 500)
   render(<App />)
+
+  expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't load deals: something went wrong (500)")
+
+  api.failures.length = 0
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+  expect(await screen.findByText('Kvarnholmen AI')).toBeInTheDocument()
+})
+
+test('nudges overdue next steps and inactive deals', async () => {
+  await renderApp()
 
   expect(card('Kvarnholmen AI')).toHaveTextContent('Next step overdue: 2 days')
   expect(card('Lumen Health')).toHaveTextContent('Follow-up due: 6 days inactive')
   expect(card('Saltsjö Insurance')).not.toHaveTextContent(/overdue|Follow-up due/)
 })
 
-test('a quick note logs to the timeline and clears the inactivity nudge', () => {
-  render(<App />)
+test('a quick note is saved, logs to the timeline and clears the inactivity nudge', async () => {
+  await renderApp()
   const drawer = open('Lumen Health')
 
   fireEvent.change(within(drawer).getByLabelText('Quick note'), { target: { value: 'Got the intro, call on Friday' } })
   fireEvent.click(within(drawer).getByRole('button', { name: 'Save Note' }))
 
-  expect(within(drawer).getByText('Got the intro, call on Friday')).toBeInTheDocument()
+  expect(await within(drawer).findByText('Got the intro, call on Friday')).toBeInTheDocument()
   expect(within(drawer).getByLabelText('Quick note')).toHaveValue('')
   expect(card('Lumen Health')).not.toHaveTextContent('Follow-up due')
+  expect(api.requests).toContainEqual({
+    method: 'POST',
+    path: '/api/deals/lumen/notes',
+    body: { body: 'Got the intro, call on Friday' },
+  })
 })
 
-test('moving the due date clears the overdue nudge', () => {
-  render(<App />)
-  const drawer = open('Kvarnholmen AI')
+test('a note that fails to save stays in the box, with the reason', async () => {
+  api.fail('POST', /\/notes$/, 400, 'a note needs text')
+  await renderApp()
+  const drawer = open('Lumen Health')
 
-  fireEvent.change(within(drawer).getByLabelText('Due'), { target: { value: '2099-01-01' } })
+  fireEvent.change(within(drawer).getByLabelText('Quick note'), { target: { value: 'Got the intro' } })
+  fireEvent.click(within(drawer).getByRole('button', { name: 'Save Note' }))
 
-  expect(card('Kvarnholmen AI')).not.toHaveTextContent('overdue')
+  expect(await within(drawer).findByRole('alert')).toHaveTextContent("Couldn't save the note: a note needs text (400)")
+  expect(within(drawer).getByLabelText('Quick note')).toHaveValue('Got the intro')
+  expect(card('Lumen Health')).toHaveTextContent('Follow-up due')
 })
 
-test('changing the status moves the card to that column', () => {
-  render(<App />)
+test('changing the status moves the card and saves it', async () => {
+  await renderApp()
   open('Lumen Health')
 
   fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'discussing' } })
@@ -99,10 +125,47 @@ test('changing the status moves the card to that column', () => {
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   expect(within(column('Discussing')).getByText('Lumen Health')).toBeInTheDocument()
   expect(within(column('Lead')).queryByText('Lumen Health')).not.toBeInTheDocument()
+  expect(patches()).toEqual([{ method: 'PATCH', path: '/api/deals/lumen', body: { status: 'discussing' } }])
 })
 
-test('Send Email opens a mail to the deal contact', () => {
-  render(<App />)
+test('a change that fails to save goes back, with the reason', async () => {
+  api.fail('PATCH', /^\/api\/deals\//, 500)
+  await renderApp()
+  open('Lumen Health')
+
+  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'discussing' } })
+
+  expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't save Lumen Health: something went wrong (500)")
+  expect(screen.getByLabelText('Status')).toHaveValue('lead')
+  expect(within(column('Lead')).getByText('Lumen Health')).toBeInTheDocument()
+})
+
+test('moving the due date clears the overdue nudge', async () => {
+  await renderApp()
+  const drawer = open('Kvarnholmen AI')
+
+  fireEvent.change(within(drawer).getByLabelText('Due'), { target: { value: '2099-01-01' } })
+
+  expect(card('Kvarnholmen AI')).not.toHaveTextContent('overdue')
+  expect(patches()[0].body).toEqual({ nextStepDue: '2099-01-01' })
+})
+
+test('the next step saves when you leave the field, not on every keystroke', async () => {
+  await renderApp()
+  const drawer = open('Lumen Health')
+  const field = within(drawer).getByRole('textbox', { name: 'Next step' })
+
+  fireEvent.change(field, { target: { value: 'Book' } })
+  fireEvent.change(field, { target: { value: 'Book a call' } })
+  expect(patches()).toEqual([])
+
+  fireEvent.blur(field)
+  expect(patches()).toEqual([{ method: 'PATCH', path: '/api/deals/lumen', body: { nextStep: 'Book a call' } }])
+  expect(card('Lumen Health')).toHaveTextContent('Book a call')
+})
+
+test('Send Email opens a mail to the deal contact', async () => {
+  await renderApp()
   const drawer = open('Granit Consulting')
 
   expect(within(drawer).getByRole('link', { name: 'Send Email' })).toHaveAttribute(
@@ -111,18 +174,18 @@ test('Send Email opens a mail to the deal contact', () => {
   )
 })
 
-test('the drawer links to other deals with the same company', () => {
-  render(<App />)
+test('the drawer links to other deals with the same company', async () => {
+  await renderApp()
   const drawer = open('Granit Consulting')
 
-  fireEvent.click(within(drawer).getByRole('button', { name: /VT 2026 · Panel discussion/ }))
+  fireEvent.click(within(drawer).getByRole('button', { name: new RegExp(`${lastSemester} · Panel discussion`) }))
 
-  expect(screen.getByLabelText('Semester')).toHaveValue('VT 2026')
+  expect(screen.getByLabelText('Semester')).toHaveValue(lastSemester)
   expect(screen.getByRole('dialog', { name: 'Granit Consulting' })).toHaveTextContent('Panel discussion')
 })
 
-test('search filters by company, contact and notes', () => {
-  render(<App />)
+test('search filters by company, contact and notes', async () => {
+  await renderApp()
 
   fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'founders' } })
 
@@ -130,8 +193,8 @@ test('search filters by company, contact and notes', () => {
   expect(screen.queryByText('Lumen Health')).not.toBeInTheDocument()
 })
 
-test('filters for follow-ups and shows canceled deals on request', () => {
-  render(<App />)
+test('filters for follow-ups and shows canceled deals on request', async () => {
+  await renderApp()
   expect(screen.queryByText('Brygga Capital')).not.toBeInTheDocument()
 
   fireEvent.click(screen.getByRole('button', { name: 'Show canceled' }))
@@ -142,8 +205,8 @@ test('filters for follow-ups and shows canceled deals on request', () => {
   expect(screen.queryByText('Saltsjö Insurance')).not.toBeInTheDocument()
 })
 
-test('the list view shows the deal log as a table', () => {
-  render(<App />)
+test('the list view shows the deal log as a table', async () => {
+  await renderApp()
 
   fireEvent.click(screen.getByRole('button', { name: 'List' }))
 
@@ -153,22 +216,43 @@ test('the list view shows the deal log as a table', () => {
   expect(row).toHaveTextContent('Not sent')
 })
 
-test('a new lead lands in Lead, owned by the signed-in user', async () => {
-  render(<App />)
+async function addLead(fields: Record<string, string>) {
   await screen.findByText('Signed in as dev@kthais.com')
   fireEvent.click(screen.getByRole('button', { name: 'New Lead' }))
   const form = screen.getByRole('dialog', { name: 'New lead' })
-
-  fireEvent.change(within(form).getByLabelText('Company'), { target: { value: 'Nordljus AB' } })
-  fireEvent.change(within(form).getByLabelText('Next step'), { target: { value: 'Send intro email' } })
+  for (const [label, value] of Object.entries(fields)) {
+    fireEvent.change(within(form).getByLabelText(label), { target: { value } })
+  }
   fireEvent.click(within(form).getByRole('button', { name: 'Add lead' }))
+  return form
+}
 
-  expect(screen.getByRole('dialog', { name: 'Nordljus AB' })).toHaveTextContent('Dev User')
+test('a new lead is saved to Lead in the selected semester, owned by the signed-in user', async () => {
+  await renderApp()
+
+  await addLead({ Company: 'Nordljus AB', 'Next step': 'Send intro email' })
+
+  expect(await screen.findByRole('dialog', { name: 'Nordljus AB' })).toHaveTextContent('Dev User')
   expect(within(column('Lead')).getByText('Nordljus AB')).toBeInTheDocument()
+  expect(api.requests).toContainEqual({
+    method: 'POST',
+    path: '/api/deals',
+    body: { company: 'Nordljus AB', dealType: 'Event', semester: thisSemester, contactName: '', contactEmail: '', nextStep: 'Send intro email' },
+  })
 })
 
-test('a signed fee with no invoice status counts as unpaid', () => {
-  render(<App />)
+test('a lead that fails to save keeps the form open, with the reason', async () => {
+  api.fail('POST', /^\/api\/deals$/, 500)
+  await renderApp()
+
+  const form = await addLead({ Company: 'Nordljus AB' })
+
+  expect(await within(form).findByRole('alert')).toHaveTextContent("Couldn't add the lead: something went wrong (500)")
+  expect(within(form).getByLabelText('Company')).toHaveValue('Nordljus AB')
+})
+
+test('a signed fee with no invoice status counts as unpaid', async () => {
+  await renderApp()
   open('Kvarnholmen AI')
 
   fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'signed' } })
@@ -179,8 +263,8 @@ test('a signed fee with no invoice status counts as unpaid', () => {
 
 test('New Lead waits for the signed-in user', async () => {
   let signIn: (res: Response) => void = () => {}
-  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => (signIn = resolve))))
-  render(<App />)
+  api = stubApi({ me: () => new Promise<Response>((resolve) => (signIn = resolve)) })
+  await renderApp()
 
   expect(screen.getByRole('button', { name: 'New Lead' })).toBeDisabled()
 
@@ -190,38 +274,38 @@ test('New Lead waits for the signed-in user', async () => {
 })
 
 test('New Lead stays disabled when sign-in fails', async () => {
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 500 })))
+  api = stubApi({ me: async () => new Response('', { status: 500 }) })
   render(<App />)
 
   await screen.findByText('Loading the signed-in user failed (500)')
   expect(screen.getByRole('button', { name: 'New Lead' })).toBeDisabled()
 })
 
-test('a negative fee is ignored', () => {
-  render(<App />)
+test('a negative fee is not saved', async () => {
+  await renderApp()
   const drawer = open('Granit Consulting')
+  const fee = within(drawer).getByLabelText('Fee (SEK)')
 
-  fireEvent.change(within(drawer).getByLabelText('Fee (SEK)'), { target: { value: '-1000' } })
+  fireEvent.change(fee, { target: { value: '-1000' } })
+  fireEvent.blur(fee)
 
+  expect(fee).toHaveValue(40000)
+  expect(patches()).toEqual([])
   expect(screen.getByText('Confirmed:')).toHaveTextContent('Confirmed: 40,000 SEK')
 })
 
 test('Send Email needs a contact email', async () => {
-  render(<App />)
-  await screen.findByText('Signed in as dev@kthais.com')
-  fireEvent.click(screen.getByRole('button', { name: 'New Lead' }))
-  const form = screen.getByRole('dialog', { name: 'New lead' })
-  fireEvent.change(within(form).getByLabelText('Company'), { target: { value: 'Nordljus AB' } })
-  fireEvent.change(within(form).getByLabelText('Contact name'), { target: { value: 'Kim Ek' } })
-  fireEvent.click(within(form).getByRole('button', { name: 'Add lead' }))
+  await renderApp()
 
-  const drawer = screen.getByRole('dialog', { name: 'Nordljus AB' })
+  await addLead({ Company: 'Nordljus AB', 'Contact name': 'Kim Ek' })
+
+  const drawer = await screen.findByRole('dialog', { name: 'Nordljus AB' })
   expect(within(drawer).queryByRole('link', { name: 'Send Email' })).not.toBeInTheDocument()
   expect(within(drawer).getByText('No contact email')).toBeInTheDocument()
 })
 
-test('the drawer takes focus, keeps Tab inside, and returns focus on Escape', () => {
-  render(<App />)
+test('the drawer takes focus, keeps Tab inside, and returns focus on Escape', async () => {
+  await renderApp()
   card('Lumen Health').focus()
   const drawer = open('Lumen Health')
   expect(drawer).toHaveFocus()
@@ -238,16 +322,16 @@ test('the drawer takes focus, keeps Tab inside, and returns focus on Escape', ()
 })
 
 test('the New Lead form focuses Company first', async () => {
-  render(<App />)
+  await renderApp()
   await screen.findByText('Signed in as dev@kthais.com')
   fireEvent.click(screen.getByRole('button', { name: 'New Lead' }))
 
   expect(screen.getByLabelText('Company')).toHaveFocus()
 })
 
-test('nudges update when the tab becomes visible again', () => {
+test('nudges update when the tab becomes visible again', async () => {
   vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
-  render(<App />)
+  await renderApp()
   expect(card('Vinga Voice')).not.toHaveTextContent('overdue')
 
   vi.setSystemTime(Date.now() + 2 * 24 * 60 * 60 * 1000)
