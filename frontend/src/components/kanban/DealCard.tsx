@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { ArrowRight } from 'lucide-react'
-import { nudgeFor, type Deal } from '../../data/mockDeals'
+import { nudgeFor, type Deal } from '../../data/deals'
 import { formatDate, formatDateRange } from '../../format'
 import { DealTypeBadge, InvoiceBadge, NudgeBadge } from '../badges'
 import OwnerAvatar from '../OwnerAvatar'
 import Fee from '../Fee'
+import { DEAL_DRAG_TYPE } from './drag'
 
 type Props = {
   deal: Deal
@@ -11,6 +13,7 @@ type Props = {
 }
 
 export default function DealCard({ deal, onSelect }: Props) {
+  const [dragging, setDragging] = useState(false)
   const nudge = nudgeFor(deal)
   const when = formatDateRange(deal.startDate, deal.endDate)
 
@@ -18,7 +21,17 @@ export default function DealCard({ deal, onSelect }: Props) {
     <button
       type="button"
       onClick={() => onSelect(deal.id)}
-      className="w-full rounded-lg border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-indigo-200 hover:shadow focus-visible:outline-2 focus-visible:outline-indigo-500"
+      // Drag a card onto another column to change its status (KanbanColumn handles the drop).
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(DEAL_DRAG_TYPE, deal.id)
+        e.dataTransfer.effectAllowed = 'move'
+        setDragging(true)
+      }}
+      onDragEnd={() => setDragging(false)}
+      className={`w-full cursor-grab rounded-lg border border-gray-200 bg-white p-3 text-left shadow-sm transition hover:border-indigo-200 hover:shadow focus-visible:outline-2 focus-visible:outline-indigo-500 active:cursor-grabbing ${
+        dragging ? 'opacity-40' : ''
+      }`}
     >
       <div className="flex items-start justify-between gap-2">
         <h3 className="text-sm font-semibold text-gray-900">{deal.company}</h3>

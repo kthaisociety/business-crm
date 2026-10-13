@@ -1,19 +1,13 @@
 import { useRef, useState, type FormEvent } from 'react'
 import { X } from 'lucide-react'
-import { DEAL_TYPES, type DealType } from '../../data/mockDeals'
+import type { NewLeadInput } from '../../api'
+import { DEAL_TYPES, type DealType } from '../../data/deals'
 import { useModal } from '../../hooks'
-
-export type NewLead = {
-  company: string
-  dealType: DealType
-  contactName: string
-  contactEmail: string
-  nextStep: string
-}
 
 type Props = {
   semester: string
-  onCreate: (lead: NewLead) => void
+  // Resolves once the lead is saved; the form stays open with the error if it rejects.
+  onCreate: (lead: Omit<NewLeadInput, 'semester'>) => Promise<void>
   onClose: () => void
 }
 
@@ -25,21 +19,32 @@ export default function NewLeadDialog({ semester, onCreate, onClose }: Props) {
   const [dealType, setDealType] = useState<DealType>('Event')
   const [contactName, setContactName] = useState('')
   const [contactEmail, setContactEmail] = useState('')
+  const [contactRole, setContactRole] = useState('')
   const [nextStep, setNextStep] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const dialog = useRef<HTMLFormElement>(null)
   useModal(dialog, onClose)
 
-  const submit = (e: FormEvent) => {
+  const submit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!company.trim()) return
-    onCreate({
-      company: company.trim(),
-      dealType,
-      contactName: contactName.trim(),
-      contactEmail: contactEmail.trim(),
-      nextStep: nextStep.trim(),
-    })
+    if (!company.trim() || saving) return
+    setSaving(true)
+    setError(null)
+    try {
+      await onCreate({
+        company: company.trim(),
+        dealType,
+        contactName: contactName.trim(),
+        contactEmail: contactEmail.trim(),
+        contactRole: contactRole.trim(),
+        nextStep: nextStep.trim(),
+      })
+    } catch (err) {
+      setError(`Couldn't add the lead: ${err instanceof Error ? err.message : String(err)}`)
+      setSaving(false)
+    }
   }
 
   return (
@@ -84,12 +89,26 @@ export default function NewLeadDialog({ semester, onCreate, onClose }: Props) {
             </label>
           </div>
           <label className="block">
+            Contact role
+            <input
+              value={contactRole}
+              onChange={(e) => setContactRole(e.target.value)}
+              className={input}
+              placeholder="e.g. Talent Acquisition Lead"
+            />
+          </label>
+          <label className="block">
             Next step
             <input value={nextStep} onChange={(e) => setNextStep(e.target.value)} className={input} placeholder="e.g. Send intro email" />
           </label>
         </div>
-        <button type="submit" className="mt-5 w-full rounded-lg bg-indigo-600 py-2 text-xs font-semibold text-white hover:bg-indigo-700">
-          Add lead
+        {error && (
+          <p role="alert" className="mt-4 text-xs text-red-600">
+            {error}
+          </p>
+        )}
+        <button type="submit" disabled={saving} className="mt-5 w-full rounded-lg bg-indigo-600 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">
+          {saving ? 'Adding…' : 'Add lead'}
         </button>
       </form>
     </div>

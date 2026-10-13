@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/kthaisociety/business-crm/internal/auth"
+	"github.com/kthaisociety/business-crm/internal/deals"
 )
 
 type Deps struct {
@@ -21,6 +22,7 @@ type Deps struct {
 	// DevUser is who every request is signed in as until identity-service is live (docs/pcr/0005). Nil
 	// refuses every request but health.
 	DevUser *auth.User
+	Deals   *deals.Store
 }
 
 func NewRouter(d Deps) *gin.Engine {
@@ -32,6 +34,10 @@ func NewRouter(d Deps) *gin.Engine {
 
 	signedIn := api.Group("", auth.Middleware(d.DevUser))
 	signedIn.GET("/me", me)
+	signedIn.GET("/deals", listDeals(d.Deals))
+	signedIn.POST("/deals", createDeal(d.Deals))
+	signedIn.PATCH("/deals/:id", updateDeal(d.Deals))
+	signedIn.POST("/deals/:id/notes", addNote(d.Deals))
 
 	r.NoRoute(frontend(d.Frontend))
 	return r

@@ -1,4 +1,4 @@
-import { STATUSES, nudgeFor, statusLabel, type Deal } from '../../data/mockDeals'
+import { STATUSES, nudgeFor, statusLabel, type Deal } from '../../data/deals'
 import { formatDate, formatDateRange } from '../../format'
 import { DealTypeBadge, InvoiceBadge, NudgeBadge } from '../badges'
 import Fee from '../Fee'

@@ -1,6 +1,6 @@
 import { AlertTriangle, Clock } from 'lucide-react'
-import type { Deal, DealType, Nudge } from '../data/mockDeals'
-import { invoiceLabel } from '../data/mockDeals'
+import type { Deal, DealType, Nudge } from '../data/deals'
+import { invoiceLabel } from '../data/deals'
 
 const dealTypeStyles: Record<DealType, string> = {
   Event: 'bg-indigo-50 text-indigo-700 border-indigo-200',

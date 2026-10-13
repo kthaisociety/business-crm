@@ -1,7 +1,7 @@
 # business-crm
 
-The KTHAIS business team's CRM. Just scaffolded: no CRM features yet. Until identity-service is live, sign-in
-is simulated and the app holds no real personal data
+The KTHAIS business team's CRM: the business team's deal log as a board and a list, with follow-up nudges.
+Until identity-service is live, sign-in is simulated and the app holds no real personal data
 ([PCR 0005](docs/pcr/0005-simulated-sign-in-until-identity-service.md)).
 
 One repo, one image: a Go server serves the JSON API under `/api` and the frontend (Vite + React, embedded
@@ -14,6 +14,7 @@ Needs Go 1.26, Node 24 and Docker.
 ```sh
 docker compose up -d                          # Postgres on 127.0.0.1:5436
 cp .env.example .env
+go run ./cmd/seed                             # once: made-up deals, so the board isn't empty
 go run ./cmd/server                           # 127.0.0.1:8002
 cd frontend && npm install && npm run dev     # http://127.0.0.1:5174, /api proxied to 8002
 ```
@@ -48,6 +49,12 @@ The schema is SQL files in `internal/database/migrations/`, applied by the serve
 |---|---|
 | `GET /api/health` | `{"service":"business-crm","status":"healthy"}`, or 503 if the database is unreachable |
 | `GET /api/me` | the signed-in user: `{"sub":"…","email":"…","name":"…"}`; 401 if no one is |
+| `GET /api/deals` | every deal, with owner, support and timeline |
+| `POST /api/deals` | adds a lead owned by the signed-in user: `{company, dealType, semester, contactName, contactEmail, contactRole, nextStep}` |
+| `PATCH /api/deals/:id` | changes `status`, `nextStep`, `nextStepDue`, `feeSEK` or `invoiceStatus`; `null` clears a nullable one |
+| `POST /api/deals/:id/notes` | adds a quick note to the deal's timeline: `{body}` |
+
+Every route but health needs a signed-in user. A bad request gets a 400 whose `error` says what was wrong.
 
 ## Configuration
 

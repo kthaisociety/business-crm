@@ -1,21 +1,24 @@
-import { STATUSES, type Deal } from '../../data/mockDeals'
+import { STATUSES, type Deal, type Status } from '../../data/deals'
 import KanbanColumn from './KanbanColumn'
 
 type Props = {
   deals: Deal[]
   showCanceled: boolean
   onSelect: (id: string) => void
+  onMove: (id: string, status: Status) => void
 }
 
-export default function KanbanBoard({ deals, showCanceled, onSelect }: Props) {
+export default function KanbanBoard({ deals, showCanceled, onSelect, onMove }: Props) {
   return (
     <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-6 pb-6">
       {STATUSES.filter((s) => showCanceled || s.id !== 'canceled').map((status) => (
         <KanbanColumn
           key={status.id}
+          status={status.id}
           label={status.label}
           deals={deals.filter((deal) => deal.status === status.id)}
           onSelect={onSelect}
+          onMove={onMove}
         />
       ))}
     </div>
