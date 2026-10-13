@@ -1,4 +1,7 @@
-# Local Postgres only. Bound to 127.0.0.1: a dev machine with a public IP would otherwise expose it.
+# Local Postgres, and optionally the app. Ports are bound to 127.0.0.1: a dev machine with a public IP
+# would otherwise expose them.
+#   docker compose up -d                          Postgres only (for `go run` and `make test`)
+#   docker compose --profile app up -d --build    Postgres and the app image, no Go needed
 services:
   db:
     image: postgres:17-alpine
@@ -10,6 +13,25 @@ services:
       - "127.0.0.1:5436:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U crm -d crm"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  # The production image (Dockerfile) against the db above. Listens on 8002 like `go run`, so the Vite
+  # dev server's /api proxy reaches it too.
+  app:
+    profiles: [app]
+    build: .
+    environment:
+      DATABASE_URL: postgres://crm:crm@db:5432/crm?sslmode=disable
+      DEV_USER_EMAIL: dev@kthais.com
+    ports:
+      - "127.0.0.1:8002:8000"
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   postgres_data:
