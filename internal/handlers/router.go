@@ -29,7 +29,7 @@ func NewRouter(d Deps) *gin.Engine {
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
 
-	api := r.Group("/api")
+	api := r.Group("/api", limitBody(maxBodyBytes))
 	api.GET("/health", health(d.PingDB))
 
 	signedIn := api.Group("", auth.Middleware(d.DevUser))

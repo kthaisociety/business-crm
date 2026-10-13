@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { Navigate, Route, Routes } from 'react-router'
 import { addNote, createDeal, fetchDeals, fetchMe, updateDeal, type DealPatch, type NewLeadInput, type User } from './api'
@@ -76,17 +76,43 @@ export default function App() {
   const replaceDeal = (id: string, change: (deal: Deal) => Deal) =>
     setDeals((list) => list && list.map((deal) => (deal.id === id ? change(deal) : deal)))
 
-  // Edits show at once and save in the background. If saving fails, the edited fields go back to what
-  // they were and the error shows above the board.
+  // Saves to one deal go out one at a time, in the order they were made, so the server ends up with the
+  // last edit. `confirmed` holds each deal as the server last confirmed it while its saves are pending.
+  const saveQueue = useRef(new Map<string, Promise<void>>())
+  const confirmed = useRef(new Map<string, Deal>())
+
+  // Edits show at once and save in the background. If a save fails, each field it changed goes back to
+  // the last confirmed value, unless a newer edit has changed that field since; the error shows above the
+  // board.
   const saveDeal = (id: string, patch: DealPatch) => {
     const before = all.find((deal) => deal.id === id)
     if (!before) return
-    const previous = Object.fromEntries(Object.keys(patch).map((key) => [key, before[key as keyof DealPatch]]))
+    if (!confirmed.current.has(id)) confirmed.current.set(id, before)
     replaceDeal(id, (deal) => ({ ...deal, ...patch }))
     setSaveError(null)
-    updateDeal(id, patch).catch((err: unknown) => {
-      replaceDeal(id, (deal) => ({ ...deal, ...previous }))
-      setSaveError(`Couldn't save ${before.company}: ${messageOf(err)}`)
+
+    const keys = Object.keys(patch) as (keyof DealPatch)[]
+    const send = async () => {
+      try {
+        confirmed.current.set(id, await updateDeal(id, patch))
+      } catch (err) {
+        const last = confirmed.current.get(id)!
+        replaceDeal(id, (deal) => {
+          const reverted = { ...deal }
+          for (const key of keys) if (deal[key] === patch[key]) Object.assign(reverted, { [key]: last[key] })
+          return reverted
+        })
+        setSaveError(`Couldn't save ${before.company}: ${messageOf(err)}`)
+      }
+    }
+    const queued = (saveQueue.current.get(id) ?? Promise.resolve()).then(send)
+    saveQueue.current.set(id, queued)
+    void queued.then(() => {
+      // The last save in line clears the deal's queue.
+      if (saveQueue.current.get(id) === queued) {
+        saveQueue.current.delete(id)
+        confirmed.current.delete(id)
+      }
     })
   }
 
@@ -127,7 +153,8 @@ export default function App() {
         openDeals={inSemester.filter(isOpen).length}
         confirmedSEK={sumFees(inSemester.filter(isConfirmed))}
         unpaidSEK={sumFees(inSemester.filter(isUnpaid))}
-        canAddLead={user !== null}
+        // Adding waits for the deal list, so a late first load can't replace a lead added meanwhile.
+        canAddLead={user !== null && deals !== null}
         onNewLead={() => setAddingLead(true)}
       />
       <MobileNav />

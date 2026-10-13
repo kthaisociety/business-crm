@@ -37,6 +37,7 @@ const base = {
   links: {},
   rating: null,
   notes: '',
+  createdAt: '2026-01-01T00:00:00Z',
 } satisfies Partial<Deal>
 
 const note = (id: string, title: string, at: string, body = ''): Activity => ({

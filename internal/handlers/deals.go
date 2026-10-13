@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
@@ -13,6 +14,32 @@ import (
 )
 
 // The deal log API. Every route is behind auth.Middleware: creating and changing deals records who did it.
+
+// maxBodyBytes caps a request body. The largest valid one is a few text fields of at most 2,000
+// characters, so this is generous while keeping a caller from making the server read megabytes.
+const maxBodyBytes = 64 << 10
+
+func limitBody(n int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, n)
+		c.Next()
+	}
+}
+
+// readBody reads the request body, answering 413 itself when it's over the limit.
+func readBody(c *gin.Context) ([]byte, bool) {
+	body, err := io.ReadAll(c.Request.Body)
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body is too large"})
+		return nil, false
+	}
+	if err != nil {
+		fail(c, err)
+		return nil, false
+	}
+	return body, true
+}
 
 func listDeals(store *deals.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -27,8 +54,12 @@ func listDeals(store *deals.Store) gin.HandlerFunc {
 
 func createDeal(store *deals.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		body, ok := readBody(c)
+		if !ok {
+			return
+		}
 		var lead deals.NewLead
-		if err := c.ShouldBindJSON(&lead); err != nil {
+		if err := json.Unmarshal(body, &lead); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "body must be a JSON object"})
 			return
 		}
@@ -43,9 +74,8 @@ func createDeal(store *deals.Store) gin.HandlerFunc {
 
 func updateDeal(store *deals.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		body, err := io.ReadAll(c.Request.Body)
-		if err != nil {
-			fail(c, err)
+		body, ok := readBody(c)
+		if !ok {
 			return
 		}
 		cols, err := deals.ParsePatch(body)
@@ -64,9 +94,8 @@ func updateDeal(store *deals.Store) gin.HandlerFunc {
 
 func addNote(store *deals.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		body, err := io.ReadAll(c.Request.Body)
-		if err != nil {
-			fail(c, err)
+		body, ok := readBody(c)
+		if !ok {
 			return
 		}
 		text, err := deals.ParseNote(body)

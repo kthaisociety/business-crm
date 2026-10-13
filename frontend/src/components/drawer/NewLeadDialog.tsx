@@ -24,8 +24,12 @@ export default function NewLeadDialog({ semester, onCreate, onClose }: Props) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // The dialog stays open while saving: closing it then would let a late result close a newer form.
+  const close = () => {
+    if (!saving) onClose()
+  }
   const dialog = useRef<HTMLFormElement>(null)
-  useModal(dialog, onClose)
+  useModal(dialog, close)
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -49,7 +53,7 @@ export default function NewLeadDialog({ semester, onCreate, onClose }: Props) {
 
   return (
     <div className="fixed inset-0 z-40 flex items-start justify-center p-4 pt-24">
-      <button type="button" aria-label="Close new lead" tabIndex={-1} onClick={onClose} className="absolute inset-0 bg-gray-900/20" />
+      <button type="button" aria-label="Close new lead" tabIndex={-1} onClick={close} className="absolute inset-0 bg-gray-900/20" />
       <form
         ref={dialog}
         tabIndex={-1}
@@ -61,7 +65,7 @@ export default function NewLeadDialog({ semester, onCreate, onClose }: Props) {
       >
         <div className="flex items-center justify-between">
           <h2 className="font-display text-sm font-bold text-gray-900">New lead · {semester}</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="rounded-md p-1 text-gray-400 hover:bg-gray-100">
+          <button type="button" onClick={close} aria-label="Close" className="rounded-md p-1 text-gray-400 hover:bg-gray-100">
             <X size={16} aria-hidden />
           </button>
         </div>

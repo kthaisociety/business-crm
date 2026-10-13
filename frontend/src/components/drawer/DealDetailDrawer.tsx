@@ -60,11 +60,13 @@ export default function DealDetailDrawer({ deal, otherDeals, onClose, onChange, 
     e.preventDefault()
     const text = note.trim()
     if (!text || savingNote) return
+    const submitted = note
     setSavingNote(true)
     setNoteError(null)
     try {
       await onAddNote(text)
-      setNote('')
+      // Clear the box only if it still holds the saved note, not something typed since.
+      setNote((current) => (current === submitted ? '' : current))
     } catch (err) {
       setNoteError(`Couldn't save the note: ${err instanceof Error ? err.message : String(err)}`)
     } finally {
