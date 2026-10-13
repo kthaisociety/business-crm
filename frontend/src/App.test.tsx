@@ -722,3 +722,40 @@ test('the New Lead form stays open until its lead is saved', async () => {
   expect(await screen.findByRole('dialog', { name: 'Nordljus AB' })).toBeInTheDocument()
   expect(screen.queryByRole('dialog', { name: 'New lead' })).not.toBeInTheDocument()
 })
+
+test('a refresh that started before an edit doesn’t undo it', async () => {
+  await renderApp()
+  const refresh = api.hold('GET', /^\/api\/deals$/)
+  await addLead({ Company: 'Nordljus AB' })
+  const drawer = await screen.findByRole('dialog', { name: 'Nordljus AB' })
+
+  fireEvent.change(within(drawer).getByLabelText('Status'), { target: { value: 'discussing' } })
+  await waitFor(() => expect(patches()).toHaveLength(1))
+  await act(() => refresh.release())
+
+  expect(within(drawer).getByLabelText('Status')).toHaveValue('discussing')
+  expect(within(column('Discussing')).getByText('Nordljus AB')).toBeInTheDocument()
+})
+
+test('a form can’t be closed while it deletes', async () => {
+  const deleting = api.hold('DELETE', /^\/api\/companies\//)
+  renderAt('/companies')
+  await screen.findByRole('button', { name: 'Granit Consulting' })
+  fireEvent.click(screen.getByRole('button', { name: 'New company' }))
+  let form = await dialogNamed('New company')
+  fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'Aurora AB' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Add company' }))
+  await screen.findByRole('button', { name: 'Aurora AB' })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Aurora AB' }))
+  form = await dialogNamed('Edit Aurora AB')
+  fireEvent.click(within(form).getByRole('button', { name: 'Delete' }))
+  fireEvent.click(within(form).getByRole('button', { name: 'Delete company' }))
+  fireEvent.keyDown(document, { key: 'Escape' })
+  expect(form).toBeInTheDocument()
+  expect(within(form).getByRole('button', { name: 'Deleting…' })).toBeDisabled()
+
+  await act(() => deleting.release())
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  expect(screen.queryByRole('button', { name: 'Aurora AB' })).not.toBeInTheDocument()
+})

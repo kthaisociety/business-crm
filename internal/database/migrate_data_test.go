@@ -40,6 +40,7 @@ func TestCompaniesAndContactsMigrationMovesExistingDeals(t *testing.T) {
 	insert("Granit Consulting", "Per Ström", "", "Partner")                                    // no email
 	insert("Granit Consulting", "per ström", "", "")                                           // same person, by name
 	insert("Vinga Voice", "", "", "")                                                          // no contact
+	insert("Vinga Voice", "Lina Dahl", "lina.dahl@example.com", "Advisor")                     // the same email at another company
 
 	require.NoError(t, database.MigrateFS(ctx, db, migrationsUpTo(t, "00001_create_deals.sql", "00002_create_companies_and_contacts.sql")))
 
@@ -51,15 +52,19 @@ func TestCompaniesAndContactsMigrationMovesExistingDeals(t *testing.T) {
 	var contacts []contact
 	require.NoError(t, db.Raw(`SELECT ct.name, ct.email, ct.role, c.name AS company
 		FROM contacts ct JOIN companies c ON c.id = ct.company_id ORDER BY ct.name`).Scan(&contacts).Error)
-	assert.Equal(t, []contact{
+	assert.ElementsMatch(t, []contact{
 		{"Lina Dahl", "LINA.DAHL@example.com", "Recruitment Manager", "Granit Consulting"}, // the latest deal's details
+		{"Lina Dahl", "lina.dahl@example.com", "Advisor", "Vinga Voice"},                   // a contact at each company
 		{"per ström", "", "", "Granit Consulting"},
 	}, contacts)
 
-	var linked struct{ Deals, WithContact int }
-	require.NoError(t, db.Raw(`SELECT count(*) AS deals, count(contact_id) AS with_contact FROM deals`).Scan(&linked).Error)
-	assert.Equal(t, 5, linked.Deals)
-	assert.Equal(t, 4, linked.WithContact)
+	var linked struct{ Deals, WithContact, Mismatched int }
+	require.NoError(t, db.Raw(`SELECT count(*) AS deals, count(d.contact_id) AS with_contact,
+		count(*) FILTER (WHERE ct.company_id <> d.company_id) AS mismatched
+		FROM deals d LEFT JOIN contacts ct ON ct.id = d.contact_id`).Scan(&linked).Error)
+	assert.Equal(t, 6, linked.Deals)
+	assert.Equal(t, 5, linked.WithContact)
+	assert.Zero(t, linked.Mismatched, "every deal's contact works at the deal's company")
 
 	assertNoColumn(t, db, "deals", "contact_email")
 }

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { ContactFields } from '../../api'
 import type { Company, Contact } from '../../data/deals'
-import FormDialog, { DeleteButton, inputClass } from './FormDialog'
+import FormDialog, { inputClass } from './FormDialog'
 
 type Props = {
   contact?: Contact // editing this one; otherwise adding
@@ -25,13 +25,12 @@ export default function ContactDialog({ contact, companies, companyId, dealCount
       submitLabel={contact ? 'Save' : 'Add contact'}
       onSubmit={() => onSave({ companyId: company, name: name.trim(), email: email.trim(), role: role.trim() })}
       onClose={onClose}
+      onDelete={contact && dealCount === 0 ? onDelete : undefined}
+      deleteWhat="contact"
       extra={
-        contact &&
-        (dealCount === 0 ? (
-          <DeleteButton what="contact" onDelete={onDelete} />
-        ) : (
+        contact && dealCount > 0 && (
           <span className="text-[11px] text-gray-400">On deals, so it can't be deleted</span>
-        ))
+        )
       }
     >
       <label className="block">

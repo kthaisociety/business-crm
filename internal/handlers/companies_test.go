@@ -54,7 +54,7 @@ func TestCompanyAndContactErrors(t *testing.T) {
 	}{
 		{"company without a name", http.MethodPost, "/api/companies", `{"name":" "}`, http.StatusBadRequest},
 		{"company name taken", http.MethodPost, "/api/companies", `{"name":"granit consulting"}`, http.StatusConflict},
-		{"contact email taken", http.MethodPost, "/api/contacts", `{"companyId":"` + empty.ID + `","email":"LINA@example.com"}`, http.StatusConflict},
+		{"contact email taken there", http.MethodPost, "/api/contacts", `{"companyId":"` + deal.CompanyID + `","email":"LINA@example.com"}`, http.StatusConflict},
 		{"contact at unknown company", http.MethodPost, "/api/contacts", `{"companyId":"` + unknown + `","name":"Kim"}`, http.StatusBadRequest},
 		{"delete company with deals", http.MethodDelete, "/api/companies/" + deal.CompanyID, ``, http.StatusConflict},
 		{"delete contact on a deal", http.MethodDelete, "/api/contacts/" + deal.Contact.ID, ``, http.StatusConflict},

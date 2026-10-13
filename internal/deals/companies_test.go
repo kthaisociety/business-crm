@@ -2,11 +2,13 @@ package deals_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kthaisociety/business-crm/internal/database/databasetest"
 	"github.com/kthaisociety/business-crm/internal/deals"
 )
 
@@ -63,9 +65,12 @@ func TestALeadsContactMustWorkAtItsCompany(t *testing.T) {
 	_, err := s.Create(ctx, deals.NewLead{CompanyID: vinga.CompanyID, ContactID: nordljus.Contact.ID, DealType: "Event", Semester: "HT 2026"}, alva)
 	validationError(t, err)
 
-	_, err = s.Create(ctx, deals.NewLead{CompanyID: vinga.CompanyID, DealType: "Event", Semester: "HT 2026",
+	// The same email at another company is another contact there: emails are unique per company.
+	other, err := s.Create(ctx, deals.NewLead{CompanyID: vinga.CompanyID, DealType: "Event", Semester: "HT 2026",
 		Contact: &deals.ContactInput{Email: "kim.nordljus@example.com"}}, alva)
-	conflictError(t, err)
+	require.NoError(t, err)
+	assert.Equal(t, vinga.CompanyID, other.Contact.CompanyID)
+	assert.NotEqual(t, nordljus.Contact.ID, other.Contact.ID)
 
 	cols, err := deals.ParsePatch([]byte(`{"contactId":"` + nordljus.Contact.ID + `"}`))
 	require.NoError(t, err)
@@ -127,13 +132,17 @@ func TestACompanyWithDealsCantBeDeleted(t *testing.T) {
 	assert.ErrorIs(t, s.DeleteCompany(ctx, empty.ID), deals.ErrCompanyNotFound)
 }
 
-func TestContactEmailsAreUnique(t *testing.T) {
+func TestContactEmailsAreUniqueAtACompany(t *testing.T) {
 	s := newStore(t)
 	ctx := context.Background()
 	d := addLead(t, s, "Nordljus AB")
 
 	_, err := s.CreateContact(ctx, deals.ContactInput{CompanyID: d.CompanyID, Name: "Kim again", Email: "Kim.Nordljus@example.com"})
 	conflictError(t, err)
+	vinga, err := s.CreateCompany(ctx, deals.CompanyInput{Name: "Vinga Voice"})
+	require.NoError(t, err)
+	_, err = s.CreateContact(ctx, deals.ContactInput{CompanyID: vinga.ID, Name: "Kim", Email: "kim.nordljus@example.com"})
+	assert.NoError(t, err)
 
 	sam, err := s.CreateContact(ctx, deals.ContactInput{CompanyID: d.CompanyID, Name: "Sam Berg", Email: "sam@example.com"})
 	require.NoError(t, err)
@@ -176,4 +185,48 @@ func TestAContactOnDealsStaysWithTheirCompany(t *testing.T) {
 
 	_, err = s.UpdateContact(ctx, d.Contact.ID, map[string]any{"name": "", "email": ""})
 	validationError(t, err)
+}
+
+func TestLeadsForTheSameNewCompanyAtOnceShareIt(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	const n = 8
+	errs := make(chan error, n)
+	var wg sync.WaitGroup
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := s.Create(ctx, deals.NewLead{Company: "Aurora AB", DealType: "Event", Semester: "HT 2026",
+				Contact: &deals.ContactInput{Name: "Mia", Email: "mia@example.com"}}, alva)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		assert.NoError(t, err)
+	}
+
+	companies, err := s.ListCompanies(ctx)
+	require.NoError(t, err)
+	assert.Len(t, companies, 1)
+	contacts, err := s.ListContacts(ctx)
+	require.NoError(t, err)
+	assert.Len(t, contacts, 1)
+}
+
+// The database itself keeps each deal's contact at the deal's company, whatever order requests run in.
+func TestTheDatabaseKeepsADealsContactAtItsCompany(t *testing.T) {
+	db := databasetest.Open(t)
+	s := deals.NewStore(db)
+	ctx := context.Background()
+	d := addLead(t, s, "Nordljus AB")
+	vinga, err := s.CreateCompany(ctx, deals.CompanyInput{Name: "Vinga Voice"})
+	require.NoError(t, err)
+
+	err = db.Exec(`UPDATE contacts SET company_id = ? WHERE id = ?`, vinga.ID, d.Contact.ID).Error
+	assert.ErrorContains(t, err, "deals_contact_at_company")
+	err = db.Exec(`DELETE FROM contacts WHERE id = ?`, d.Contact.ID).Error
+	assert.ErrorContains(t, err, "deals_contact_at_company")
 }

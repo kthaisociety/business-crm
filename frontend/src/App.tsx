@@ -93,12 +93,34 @@ export default function App() {
     return () => controller.abort()
   }, [load])
 
+  // Saves to one deal go out one at a time, in the order they were made, so the server ends up with the
+  // last edit. `confirmed` holds each deal as the server last confirmed it while its saves are pending.
+  const saveQueue = useRef(new Map<string, Promise<void>>())
+  const confirmed = useRef(new Map<string, Deal>())
+
+  // Local changes to deals, numbered in order, so a reload can tell which deals changed after it started.
+  const changes = useRef({ count: 0, byDeal: new Map<string, number>() })
+  const markChanged = (id: string) => changes.current.byDeal.set(id, ++changes.current.count)
+  const reloads = useRef(0)
+
   // After a change that shows in more than one place (a company's name is on its deals, a new lead may
-  // add a company and contact), everything reloads.
-  const reload = () =>
-    fetchAll()
-      .then(setData)
+  // add a company and contact), everything reloads. Only the latest reload applies, and it keeps any deal
+  // changed here since it started, or still saving: its snapshot may predate those edits.
+  const reload = () => {
+    const reload = ++reloads.current
+    const since = changes.current.count
+    return fetchAll()
+      .then((fresh) => {
+        if (reload !== reloads.current) return
+        setData((current) => {
+          const keep = (deal: Deal) =>
+            (changes.current.byDeal.get(deal.id) ?? 0) > since || saveQueue.current.has(deal.id)
+          const local = new Map(current?.deals.filter(keep).map((d) => [d.id, d]))
+          return { ...fresh, deals: fresh.deals.map((deal) => local.get(deal.id) ?? deal) }
+        })
+      })
       .catch((err: unknown) => setSaveError(`Couldn't refresh: ${messageOf(err)}`))
+  }
 
   const all = data?.deals ?? []
   const companies = data?.companies ?? []
@@ -109,11 +131,6 @@ export default function App() {
   const replaceDeal = (id: string, change: (deal: Deal) => Deal) =>
     setData((d) => d && { ...d, deals: d.deals.map((deal) => (deal.id === id ? change(deal) : deal)) })
 
-  // Saves to one deal go out one at a time, in the order they were made, so the server ends up with the
-  // last edit. `confirmed` holds each deal as the server last confirmed it while its saves are pending.
-  const saveQueue = useRef(new Map<string, Promise<void>>())
-  const confirmed = useRef(new Map<string, Deal>())
-
   // Edits show at once and save in the background. If a save fails, each field it changed goes back to
   // the last confirmed value, unless a newer edit has changed that field since; the error shows above the
   // board.
@@ -121,6 +138,7 @@ export default function App() {
     const before = all.find((deal) => deal.id === id)
     if (!before) return
     if (!confirmed.current.has(id)) confirmed.current.set(id, before)
+    markChanged(id)
     const { contactId, ...fields } = patch
     const local: Partial<Deal> = { ...fields }
     if (contactId !== undefined) local.contact = contacts.find((c) => c.id === contactId) ?? null
@@ -156,6 +174,7 @@ export default function App() {
   // Resolves once the note is saved; the drawer keeps the text if it rejects.
   const saveNote = async (id: string, text: string) => {
     const note = await addNote(id, text)
+    markChanged(id)
     replaceDeal(id, (deal) => ({ ...deal, activities: [...deal.activities, note] }))
   }
 

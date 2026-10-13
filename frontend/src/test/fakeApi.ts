@@ -19,7 +19,7 @@ export type FakeApi = {
   failures: Failure[]
   fail: (method: string, path: RegExp, status?: number, error?: string) => void
   failOnce: (method: string, path: RegExp, status?: number, error?: string) => void
-  // Hold matching requests unanswered until release() is called, to test what happens meanwhile.
+  // Hold back the answers to matching requests until release() is called, to test what happens meanwhile.
   hold: (method: string, path: RegExp) => { release: () => Promise<void> }
 }
 
@@ -72,8 +72,6 @@ export function stubApi(options: { me?: () => Promise<Response> } = {}): FakeApi
   }
 
   const handle = async (method: string, path: string, body: Body): Promise<Response> => {
-    const held = holds.find((h) => h.method === method && h.path.test(path))
-    if (held) await held.gate
     const failure = api.failures.find((f) => f.method === method && f.path.test(path))
     if (failure?.once) api.failures.splice(api.failures.indexOf(failure), 1)
     if (failure) return error(failure.status, failure.error)
@@ -223,7 +221,12 @@ export function stubApi(options: { me?: () => Promise<Response> } = {}): FakeApi
       const method = init?.method ?? 'GET'
       const body = init?.body ? JSON.parse(init.body as string) : undefined
       api.requests.push({ method, path: input, body })
-      return handle(method, input, body ?? {})
+      // A held request is answered as of when it arrived, like a slow server: the response waits, the
+      // data it carries doesn't.
+      const response = await handle(method, input, body ?? {})
+      const held = holds.find((h) => h.method === method && h.path.test(input))
+      if (held) await held.gate
+      return response
     }),
   )
   return api

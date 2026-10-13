@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -19,6 +20,14 @@ var (
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// isForeignKeyViolation reports whether err is Postgres refusing to break a link: deleting a company or
+// contact a deal points at, or a deal's contact not working at the deal's company. The checks before a
+// write give the friendly message; this catches a request that slipped in between check and write.
+func isForeignKeyViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503"
 }
 
 func (s *Store) ListCompanies(ctx context.Context) ([]CompanyView, error) {
@@ -82,6 +91,9 @@ func (s *Store) DeleteCompany(ctx context.Context, id string) error {
 			return conflict("the company has %d %s; it can only be deleted without any", deals, plural(deals, "deal", "deals"))
 		}
 		res := tx.Where("id = ?", id).Delete(&Company{})
+		if isForeignKeyViolation(res.Error) {
+			return conflict("the company has deals; it can only be deleted without any")
+		}
 		if res.Error == nil && res.RowsAffected == 0 {
 			return ErrCompanyNotFound
 		}
@@ -114,18 +126,14 @@ func (s *Store) CreateContact(ctx context.Context, in ContactInput) (ContactView
 			return err
 		}
 		// Unlike a new lead's contact, a contact added on its own is never quietly the existing one.
-		if in.Email != "" {
-			var taken int64
-			if err := tx.Model(&Contact{}).Where("lower(email) = lower(?)", in.Email).Count(&taken).Error; err != nil {
-				return err
-			}
-			if taken > 0 {
-				return conflict("%s is already a contact", in.Email)
-			}
+		c := Contact{CompanyID: in.CompanyID, Name: in.Name, Email: in.Email, Role: in.Role}
+		if err := tx.Create(&c).Error; isUniqueViolation(err) {
+			return conflict("%s is already a contact there", in.Email)
+		} else if err != nil {
+			return err
 		}
-		c, err := createContact(tx, in.CompanyID, in)
 		view = viewOfContact(c)
-		return err
+		return nil
 	})
 	return view, err
 }
@@ -169,7 +177,10 @@ func (s *Store) UpdateContact(ctx context.Context, id string, cols map[string]an
 		cols["updated_at"] = time.Now()
 		if err := tx.Model(&Contact{}).Where("id = ?", id).Updates(cols).Error; err != nil {
 			if isUniqueViolation(err) {
-				return conflict("%s is already a contact", email)
+				return conflict("%s is already a contact there", email)
+			}
+			if isForeignKeyViolation(err) {
+				return conflict("the contact is on deals with their current company; add them again at the new one")
 			}
 			return err
 		}
@@ -197,6 +208,9 @@ func (s *Store) DeleteContact(ctx context.Context, id string) error {
 			return conflict("the contact is on %d %s; change %s contact first", deals, plural(deals, "deal", "deals"), plural(deals, "its", "their"))
 		}
 		res := tx.Where("id = ?", id).Delete(&Contact{})
+		if isForeignKeyViolation(res.Error) {
+			return conflict("the contact is on deals; change their contact first")
+		}
 		if res.Error == nil && res.RowsAffected == 0 {
 			return ErrContactNotFound
 		}
@@ -213,37 +227,30 @@ func companyByID(tx *gorm.DB, id string) (Company, error) {
 	return c, err
 }
 
-// companyNamed finds the company with this name, ignoring case, or adds it.
+// companyNamed finds the company with this name, ignoring case, or adds it. Two leads for the same new
+// company at once both get it: the insert does nothing if the other got there first, and the select then
+// sees theirs.
 func companyNamed(tx *gorm.DB, name string) (Company, error) {
+	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&Company{Name: name}).Error; err != nil {
+		return Company{}, err
+	}
 	var c Company
 	err := tx.Where("lower(name) = lower(?)", name).Take(&c).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		c = Company{Name: name}
-		err = tx.Create(&c).Error
-	}
 	return c, err
 }
 
-// createContact adds a contact at a company. An email that's already a contact there is that contact;
-// at another company, it's a conflict.
+// createContact adds a new lead's contact at a company. An email already a contact there is that
+// contact, also when two leads add it at once.
 func createContact(tx *gorm.DB, companyID string, in ContactInput) (Contact, error) {
-	if in.Email != "" {
-		var existing Contact
-		err := tx.Where("lower(email) = lower(?)", in.Email).Take(&existing).Error
-		if err == nil {
-			if existing.CompanyID != companyID {
-				var other Company
-				_ = tx.Where("id = ?", existing.CompanyID).Take(&other).Error
-				return existing, conflict("%s is already a contact at %s", in.Email, other.Name)
-			}
-			return existing, nil
-		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return existing, err
-		}
-	}
 	c := Contact{CompanyID: companyID, Name: in.Name, Email: in.Email, Role: in.Role}
-	return c, tx.Create(&c).Error
+	if in.Email == "" {
+		return c, tx.Create(&c).Error
+	}
+	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&c).Error; err != nil {
+		return c, err
+	}
+	err := tx.Where("company_id = ? AND lower(email) = lower(?)", companyID, in.Email).Take(&c).Error
+	return c, err
 }
 
 func plural(n int64, one, many string) string {

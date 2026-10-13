@@ -3,7 +3,13 @@
 -- every deal, and gives email sync and Fathom one place to match a sender or attendee.
 --
 -- Existing deals move over: one company per name (ignoring case and surrounding spaces), and one contact
--- per email, or per name at the same company when there is no email.
+-- per email at each company, or per name at a company when there is no email. An email is unique within a
+-- company, not across companies, so old deals that used one address at two companies keep a contact at
+-- each.
+--
+-- A deal's contact works at the deal's company. The database enforces that with a foreign key on
+-- (contact_id, company_id), so a contact can't move to another company while deals point at them, however
+-- the requests interleave.
 
 -- +goose Up
 CREATE TABLE companies (
@@ -25,16 +31,16 @@ CREATE TABLE contacts (
     role       text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
-    CHECK (btrim(name) <> '' OR btrim(email) <> '')
+    CHECK (btrim(name) <> '' OR btrim(email) <> ''),
+    UNIQUE (id, company_id) -- the target of deals' (contact_id, company_id) key
 );
 
--- One person per email address; contacts without an email aren't limited.
-CREATE UNIQUE INDEX contacts_email_key ON contacts (lower(email)) WHERE email <> '';
-CREATE INDEX contacts_company_idx ON contacts (company_id);
+-- One person per email address at a company; contacts without an email aren't limited.
+CREATE UNIQUE INDEX contacts_email_key ON contacts (company_id, lower(email)) WHERE email <> '';
 
 ALTER TABLE deals
     ADD COLUMN company_id uuid REFERENCES companies (id),
-    ADD COLUMN contact_id uuid REFERENCES contacts (id);
+    ADD COLUMN contact_id uuid;
 
 INSERT INTO companies (name)
 SELECT DISTINCT ON (lower(btrim(company))) btrim(company)
@@ -46,12 +52,12 @@ SET company_id = c.id
 FROM companies c
 WHERE lower(c.name) = lower(btrim(d.company));
 
--- Contacts with an email: the latest deal's name and role, at that deal's company.
+-- Contacts with an email: one per company, with the latest deal's name and role.
 INSERT INTO contacts (company_id, name, email, role)
-SELECT DISTINCT ON (lower(btrim(contact_email))) company_id, btrim(contact_name), btrim(contact_email), btrim(contact_role)
+SELECT DISTINCT ON (company_id, lower(btrim(contact_email))) company_id, btrim(contact_name), btrim(contact_email), btrim(contact_role)
 FROM deals
 WHERE btrim(contact_email) <> ''
-ORDER BY lower(btrim(contact_email)), created_at DESC;
+ORDER BY company_id, lower(btrim(contact_email)), created_at DESC;
 
 -- Contacts without an email: one per name at each company.
 INSERT INTO contacts (company_id, name, role)
@@ -63,7 +69,7 @@ ORDER BY company_id, lower(btrim(contact_name)), created_at DESC;
 UPDATE deals d
 SET contact_id = ct.id
 FROM contacts ct
-WHERE btrim(d.contact_email) <> '' AND lower(ct.email) = lower(btrim(d.contact_email));
+WHERE btrim(d.contact_email) <> '' AND ct.company_id = d.company_id AND lower(ct.email) = lower(btrim(d.contact_email));
 
 UPDATE deals d
 SET contact_id = ct.id
@@ -73,6 +79,7 @@ WHERE btrim(d.contact_email) = '' AND btrim(d.contact_name) <> ''
 
 ALTER TABLE deals
     ALTER COLUMN company_id SET NOT NULL,
+    ADD CONSTRAINT deals_contact_at_company FOREIGN KEY (contact_id, company_id) REFERENCES contacts (id, company_id),
     DROP COLUMN company,
     DROP COLUMN contact_name,
     DROP COLUMN contact_email,

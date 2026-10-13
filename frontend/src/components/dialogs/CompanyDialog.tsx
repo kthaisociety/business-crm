@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { CompanyInput } from '../../api'
 import type { Company } from '../../data/deals'
-import FormDialog, { DeleteButton, inputClass } from './FormDialog'
+import FormDialog, { inputClass } from './FormDialog'
 
 type Props = {
   company?: Company // editing this one; otherwise adding
@@ -22,13 +22,12 @@ export default function CompanyDialog({ company, dealCount, onSave, onDelete, on
       submitLabel={company ? 'Save' : 'Add company'}
       onSubmit={() => onSave({ name: name.trim(), website: website.trim(), notes })}
       onClose={onClose}
+      onDelete={company && dealCount === 0 ? onDelete : undefined}
+      deleteWhat="company"
       extra={
-        company &&
-        (dealCount === 0 ? (
-          <DeleteButton what="company" onDelete={onDelete} />
-        ) : (
+        company && dealCount > 0 && (
           <span className="text-[11px] text-gray-400">Has deals, so it can't be deleted</span>
-        ))
+        )
       }
     >
       <label className="block">

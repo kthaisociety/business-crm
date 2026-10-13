@@ -114,7 +114,9 @@ func (s *Store) Create(ctx context.Context, lead NewLead, by auth.User) (View, e
 			OwnerID:   &owner.ID,
 			NextStep:  lead.NextStep,
 		}
-		if err := tx.Omit(clause.Associations).Create(&d).Error; err != nil {
+		if err := tx.Omit(clause.Associations).Create(&d).Error; isForeignKeyViolation(err) {
+			return invalid("that contact isn't at %s", company.Name) // moved there after the check above
+		} else if err != nil {
 			return err
 		}
 		if err := tx.Create(&Activity{
@@ -154,6 +156,9 @@ func (s *Store) Update(ctx context.Context, id string, cols map[string]any) (Vie
 		}
 		cols["updated_at"] = time.Now()
 		res := tx.Model(&Deal{}).Where("id = ?", id).Updates(cols)
+		if isForeignKeyViolation(res.Error) {
+			return invalid("that contact isn't at the deal's company")
+		}
 		if res.Error != nil {
 			return res.Error
 		}
