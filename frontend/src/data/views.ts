@@ -20,8 +20,8 @@ const latestOf = (dates: (string | null)[]) =>
 
 const sumFees = (deals: Deal[]) => deals.reduce((sum, d) => sum + (d.feeSEK ?? 0), 0)
 
-// Newest semester first; within one, the order deals were added.
-const newestFirst = (a: Deal, b: Deal) => compareSemesters(a.semester, b.semester)
+// Newest semester first; within one, the most recently added first.
+const newestFirst = (a: Deal, b: Deal) => compareSemesters(a.semester, b.semester) || b.createdAt.localeCompare(a.createdAt)
 
 export type Company = {
   name: string
@@ -120,7 +120,15 @@ export function reportFor(semester: string, all: Deal[], now = Date.now()): Seme
     return counts
   }
   const statusCounts = count((d) => d.status)
-  const ownerCounts = count((d) => d.owner?.name ?? 'Unassigned')
+  // By member, not name: two teammates can share a name. Shared names get their email to tell them apart.
+  const ownerCounts = count((d) => d.owner?.id ?? '')
+  const owners = new Map(deals.flatMap((d) => (d.owner ? [[d.owner.id, d.owner] as const] : [])))
+  const ownerLabel = (id: string) => {
+    const owner = owners.get(id)
+    if (!owner) return 'Unassigned'
+    const shared = [...owners.values()].some((o) => o.id !== id && o.name === owner.name)
+    return shared ? `${owner.name} (${owner.email})` : owner.name
+  }
   const types: DealType[] = ['Event', 'Partnership', 'Job Post']
 
   return {
@@ -136,7 +144,9 @@ export function reportFor(semester: string, all: Deal[], now = Date.now()): Seme
     pipelineSEK: sumFees(deals.filter(isOpen).filter((d) => !isConfirmed(d))),
     byStatus: STATUSES.map((s) => ({ label: s.label, value: statusCounts.get(s.id as Status) ?? 0 })),
     confirmedByType: types.map((t) => ({ label: t, value: sumFees(won.filter((d) => d.dealType === t)) })),
-    byOwner: [...ownerCounts].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label)),
+    byOwner: [...ownerCounts]
+      .map(([id, value]) => ({ label: ownerLabel(id), value }))
+      .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label)),
     needsFollowUp: deals.filter((d) => nudgeFor(d, now) !== null),
   }
 }

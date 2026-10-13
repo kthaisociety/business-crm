@@ -34,6 +34,8 @@ func TestParsePatchRejectsBadInput(t *testing.T) {
 		`{"status":"won"}`,
 		`{"status":null}`,
 		`{"feeSEK":-1000}`,
+		`{"feeSEK":2147483648}`,
+		`{"nextStep":null}`,
 		`{"feeSEK":"40000"}`,
 		`{"nextStepDue":"13/10/2026"}`,
 		`{"invoiceStatus":"overdue"}`,
@@ -73,4 +75,10 @@ func TestParseNote(t *testing.T) {
 	_, err = ParseNote([]byte(`{"body":"   "}`))
 	var invalid *ValidationError
 	assert.ErrorAs(t, err, &invalid)
+}
+
+func TestTheLargestFeeFitsTheColumn(t *testing.T) {
+	cols, err := ParsePatch([]byte(`{"feeSEK":2147483647}`))
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"fee_sek": 2147483647}, cols)
 }

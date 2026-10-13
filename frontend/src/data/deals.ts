@@ -78,6 +78,7 @@ export type Deal = {
   rating: number | null // 1–5, after the deal is finished
   notes: string
   activities: Activity[]
+  createdAt: string // when it was added, for ordering deals within a semester
 }
 
 export const DAY = 24 * 60 * 60 * 1000

@@ -142,6 +142,7 @@ type View struct {
 	Rating        *int           `json:"rating"`
 	Notes         string         `json:"notes"`
 	Activities    []ActivityView `json:"activities"`
+	CreatedAt     string         `json:"createdAt"`
 }
 
 func viewOfMember(m Member) MemberView {
@@ -182,6 +183,7 @@ func viewOf(d Deal) View {
 		Rating:        d.Rating,
 		Notes:         d.Notes,
 		Activities:    []ActivityView{},
+		CreatedAt:     d.CreatedAt.UTC().Format(time.RFC3339Nano),
 	}
 	if d.Owner != nil {
 		owner := viewOfMember(*d.Owner)
