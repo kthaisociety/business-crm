@@ -909,3 +909,23 @@ test('members see the team but can’t change it', async () => {
   expect(screen.queryByRole('button', { name: 'Add member' })).not.toBeInTheDocument()
   expect(await screen.findByText('member', { selector: 'p' })).toBeInTheDocument()
 })
+
+test('Reports are for the board and admins', async () => {
+  for (const role of ['admin', 'board'] as const) {
+    api = stubApi({ role })
+    renderAt('/reports')
+    expect(await screen.findByRole('heading', { name: `Report · ${thisSemester}` })).toBeInTheDocument()
+    expect(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Reports' })).toBeInTheDocument()
+    cleanup()
+  }
+})
+
+test('members don’t see Reports', async () => {
+  api = stubApi({ role: 'member' })
+  renderAt('/reports')
+
+  expect(await screen.findByText('Reports are for the board and admins.')).toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: /^Report/ })).not.toBeInTheDocument()
+  expect(within(screen.getByRole('navigation', { name: 'Main' })).queryByRole('link', { name: 'Reports' })).not.toBeInTheDocument()
+  expect(within(screen.getByRole('navigation', { name: 'Pages' })).queryByRole('link', { name: 'Reports' })).not.toBeInTheDocument()
+})

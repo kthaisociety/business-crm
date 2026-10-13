@@ -48,6 +48,9 @@ export const ROLES: { id: Role; label: string }[] = [
   { id: 'member', label: 'Member' },
 ]
 
+// Reports are for the board and admins (docs/adr/0003).
+export const canSeeReports = (role: Role | undefined) => role === 'admin' || role === 'board'
+
 // A business-team member: a deal's owner or support, or someone on the Team page.
 export type Person = { id: string; name: string; email: string; role?: Role }
 

@@ -1,6 +1,7 @@
 import { BarChart3, Building2, KanbanSquare, Mail, UserCog, Users } from 'lucide-react'
 import { NavLink } from 'react-router'
 import type { User } from '../../api'
+import { canSeeReports } from '../../data/deals'
 
 type Props = {
   user: User | null
@@ -11,9 +12,12 @@ const pages = [
   { label: 'Pipeline', icon: KanbanSquare, path: '/' },
   { label: 'Companies', icon: Building2, path: '/companies' },
   { label: 'Contacts', icon: Users, path: '/contacts' },
-  { label: 'Reports', icon: BarChart3, path: '/reports' },
+  { label: 'Reports', icon: BarChart3, path: '/reports', boardOnly: true },
   { label: 'Team', icon: UserCog, path: '/team' },
 ]
+
+// The pages this user's role opens.
+const pagesFor = (user: User | null) => pages.filter((p) => !p.boardOnly || canSeeReports(user?.role))
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   `flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm ${
@@ -24,7 +28,7 @@ export default function Sidebar({ user, userError }: Props) {
   return (
     <aside className="hidden w-56 shrink-0 flex-col border-r border-gray-200 bg-white p-3 md:flex">
       <nav aria-label="Main" className="flex flex-col gap-0.5">
-        {pages.map(({ label, icon: Icon, path }) => (
+        {pagesFor(user).map(({ label, icon: Icon, path }) => (
           <NavLink key={path} to={path} end className={linkClass}>
             <Icon size={16} aria-hidden />
             {label}
@@ -53,10 +57,10 @@ export default function Sidebar({ user, userError }: Props) {
 }
 
 // The sidebar is hidden on narrow screens; this row of tabs takes its place.
-export function MobileNav() {
+export function MobileNav({ user }: { user: User | null }) {
   return (
     <nav aria-label="Pages" className="flex gap-1 overflow-x-auto border-b border-gray-200 bg-white px-4 py-2 md:hidden">
-      {pages.map(({ label, path }) => (
+      {pagesFor(user).map(({ label, path }) => (
         <NavLink
           key={path}
           to={path}

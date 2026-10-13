@@ -42,6 +42,7 @@ import {
   type Contact,
   type Deal,
   type Person,
+  canSeeReports,
 } from './data/deals'
 import { messageOf } from './format'
 import { LocalEdits } from './dealSync'
@@ -314,7 +315,7 @@ export default function App() {
         canAddLead={user !== null && data !== null}
         onNewLead={() => setAddingLead(true)}
       />
-      <MobileNav />
+      <MobileNav user={user} />
       <div className="flex min-h-0 flex-1">
         <Sidebar user={user} userError={userError} />
         <main className="flex min-w-0 flex-1 flex-col">
@@ -372,7 +373,18 @@ export default function App() {
               />
               <Route path="companies" element={<CompaniesPage companies={companies} contacts={contacts} deals={all} query={query} onSelect={openDeal} actions={companyActions} contactActions={contactActions} />} />
               <Route path="contacts" element={<ContactsPage companies={companies} contacts={contacts} deals={all} query={query} onSelect={openDeal} actions={contactActions} />} />
-              <Route path="reports" element={<ReportsPage deals={all} semester={semester} onSelect={openDeal} />} />
+              <Route
+                path="reports"
+                element={
+                  canSeeReports(user?.role) ? (
+                    <ReportsPage deals={all} semester={semester} onSelect={openDeal} />
+                  ) : (
+                    <p className="m-6 text-sm text-gray-500">
+                      {user ? 'Reports are for the board and admins.' : 'Loading…'}
+                    </p>
+                  )
+                }
+              />
               <Route
                 path="team"
                 element={<TeamPage members={members} deals={all} meId={user?.memberId} isAdmin={isAdmin} actions={teamActions} />}
