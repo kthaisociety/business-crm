@@ -21,6 +21,14 @@ cd frontend && npm install && npm run dev     # http://127.0.0.1:5174, /api prox
 Or build the frontend once (`cd frontend && npm run build`) and open http://127.0.0.1:8002: the Go server
 serves it, as in production.
 
+Without Go, run the production image against the same Postgres instead of `go run`:
+
+```sh
+docker compose --profile app up -d --build    # app on http://127.0.0.1:8002, signed in as dev@kthais.com
+```
+
+Rebuild after backend changes (`--build` again). `npm run dev` still works against it on 5174.
+
 ## Tests
 
 ```sh
