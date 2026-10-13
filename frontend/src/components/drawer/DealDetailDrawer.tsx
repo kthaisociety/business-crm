@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { ExternalLink, Mail, MessageSquare, StickyNote, Star, Users, X } from 'lucide-react'
 import {
   INVOICE_STATUSES,
@@ -13,6 +13,7 @@ import {
   type Status,
 } from '../../data/mockDeals'
 import { formatDate, formatDateRange } from '../../format'
+import { useModal } from '../../hooks'
 import { DealTypeBadge, NudgeBadge } from '../badges'
 import OwnerAvatar from '../OwnerAvatar'
 
@@ -47,13 +48,8 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 export default function DealDetailDrawer({ deal, otherDeals, onClose, onChange, onAddNote, onSelect }: Props) {
   const [note, setNote] = useState('')
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  const dialog = useRef<HTMLElement>(null)
+  useModal(dialog, onClose)
 
   const saveNote = (e: FormEvent) => {
     e.preventDefault()
@@ -67,7 +63,7 @@ export default function DealDetailDrawer({ deal, otherDeals, onClose, onChange, 
   const last = lastTouchpoint(deal)
   const lastDays = last ? daysSince(last) : null
   const timeline = [...deal.activities].sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-  const mailto = deal.contact
+  const mailto = deal.contact?.email
     ? `mailto:${deal.contact.email}?subject=${encodeURIComponent(`KTHAIS × ${deal.company}`)}`
     : undefined
   const links = [
@@ -80,10 +76,12 @@ export default function DealDetailDrawer({ deal, otherDeals, onClose, onChange, 
     <div className="fixed inset-0 z-40 flex justify-end">
       <button type="button" aria-label="Close details" tabIndex={-1} onClick={onClose} className="absolute inset-0 bg-gray-900/20" />
       <aside
+        ref={dialog}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label={deal.company}
-        className="relative flex h-full w-[440px] max-w-full flex-col border-l border-gray-200 bg-white shadow-xl"
+        className="relative flex h-full w-[440px] max-w-full flex-col border-l focus:outline-none border-gray-200 bg-white shadow-xl"
       >
         <header className="flex items-start justify-between gap-3 border-b border-gray-200 px-5 py-4">
           <div>
@@ -110,7 +108,7 @@ export default function DealDetailDrawer({ deal, otherDeals, onClose, onChange, 
                 <Mail size={14} aria-hidden /> Send Email
               </a>
             ) : (
-              <span className="rounded-lg border border-dashed border-gray-200 px-3 py-1.5 text-xs text-gray-400">No contact yet</span>
+              <span className="rounded-lg border border-dashed border-gray-200 px-3 py-1.5 text-xs text-gray-400">No contact email</span>
             )}
             <label className="flex items-center gap-1.5 text-xs text-gray-500">
               Status
@@ -190,7 +188,12 @@ export default function DealDetailDrawer({ deal, otherDeals, onClose, onChange, 
                 step={1000}
                 value={deal.feeSEK ?? ''}
                 placeholder="Not agreed"
-                onChange={(e) => onChange({ feeSEK: e.target.value === '' ? null : Number(e.target.value) })}
+                onChange={(e) => {
+                  if (e.target.value === '') return onChange({ feeSEK: null })
+                  const fee = Number(e.target.value)
+                  // A fee can't be negative; ignore the keystroke rather than skew the totals.
+                  if (Number.isFinite(fee) && fee >= 0) onChange({ feeSEK: fee })
+                }}
                 className={`${field} w-32`}
               />
             </Row>

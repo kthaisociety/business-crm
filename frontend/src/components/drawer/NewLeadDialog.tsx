@@ -1,6 +1,7 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import { X } from 'lucide-react'
 import { DEAL_TYPES, type DealType } from '../../data/mockDeals'
+import { useModal } from '../../hooks'
 
 export type NewLead = {
   company: string
@@ -26,13 +27,8 @@ export default function NewLeadDialog({ semester, onCreate, onClose }: Props) {
   const [contactEmail, setContactEmail] = useState('')
   const [nextStep, setNextStep] = useState('')
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  const dialog = useRef<HTMLFormElement>(null)
+  useModal(dialog, onClose)
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -50,11 +46,13 @@ export default function NewLeadDialog({ semester, onCreate, onClose }: Props) {
     <div className="fixed inset-0 z-40 flex items-start justify-center p-4 pt-24">
       <button type="button" aria-label="Close new lead" tabIndex={-1} onClick={onClose} className="absolute inset-0 bg-gray-900/20" />
       <form
+        ref={dialog}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label="New lead"
         onSubmit={submit}
-        className="relative w-full max-w-sm rounded-xl border border-gray-200 bg-white p-5 shadow-xl"
+        className="relative w-full max-w-sm rounded-xl focus:outline-none border border-gray-200 bg-white p-5 shadow-xl"
       >
         <div className="flex items-center justify-between">
           <h2 className="font-display text-sm font-bold text-gray-900">New lead · {semester}</h2>
@@ -65,7 +63,7 @@ export default function NewLeadDialog({ semester, onCreate, onClose }: Props) {
         <div className="mt-4 space-y-3 text-xs font-medium text-gray-600">
           <label className="block">
             Company
-            <input required autoFocus value={company} onChange={(e) => setCompany(e.target.value)} className={input} />
+            <input required data-autofocus value={company} onChange={(e) => setCompany(e.target.value)} className={input} />
           </label>
           <label className="block">
             Deal type

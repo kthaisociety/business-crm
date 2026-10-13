@@ -5,8 +5,9 @@ import NewLeadDialog, { type NewLead } from './components/drawer/NewLeadDialog'
 import Header from './components/layout/Header'
 import Sidebar from './components/layout/Sidebar'
 import PipelineView from './components/PipelineView'
-import { compareSemesters, isOpen, mockDeals, type Deal, type Person } from './data/mockDeals'
+import { compareSemesters, isConfirmed, isOpen, isUnpaid, mockDeals, type Deal, type Person } from './data/mockDeals'
 import { initialsOf } from './format'
+import { useMinuteTick } from './hooks'
 
 // Deals live in memory for now: reloading the page resets them to the seed data.
 
@@ -28,17 +29,15 @@ function matches(deal: Deal, query: string): boolean {
   ].some((text) => text.toLowerCase().includes(q))
 }
 
-function personFor(user: User | null): Person | null {
-  const name = user?.name || user?.email
-  return name ? { name, initials: initialsOf(name), color: 'bg-emerald-100 text-emerald-700' } : null
+function personFor(user: User): Person {
+  const name = user.name || user.email
+  return { name, initials: initialsOf(name), color: 'bg-emerald-100 text-emerald-700' }
 }
 
-const isConfirmed = (deal: Deal) => deal.status === 'signed' || deal.status === 'finished'
-const isUnpaid = (deal: Deal) =>
-  isConfirmed(deal) && (deal.feeSEK ?? 0) > 0 && (deal.invoiceStatus === 'not_sent' || deal.invoiceStatus === 'waiting')
 const sumFees = (deals: Deal[]) => deals.reduce((sum, deal) => sum + (deal.feeSEK ?? 0), 0)
 
 export default function App() {
+  useMinuteTick()
   const [user, setUser] = useState<User | null>(null)
   const [userError, setUserError] = useState<string | null>(null)
   const [deals, setDeals] = useState<Deal[]>(mockDeals)
@@ -71,7 +70,9 @@ export default function App() {
       ],
     }))
 
+  // A new lead is owned by whoever adds it, so adding waits until we know who that is.
   const addLead = (lead: NewLead) => {
+    if (!user) return
     const deal: Deal = {
       id: newId('deal'),
       company: lead.company,
@@ -117,6 +118,7 @@ export default function App() {
         openDeals={inSemester.filter(isOpen).length}
         confirmedSEK={sumFees(inSemester.filter(isConfirmed))}
         unpaidSEK={sumFees(inSemester.filter(isUnpaid))}
+        canAddLead={user !== null}
         onNewLead={() => setAddingLead(true)}
       />
       <div className="flex min-h-0 flex-1">
@@ -143,7 +145,7 @@ export default function App() {
           }}
         />
       )}
-      {addingLead && <NewLeadDialog semester={semester} onCreate={addLead} onClose={() => setAddingLead(false)} />}
+      {addingLead && user && <NewLeadDialog semester={semester} onCreate={addLead} onClose={() => setAddingLead(false)} />}
     </div>
   )
 }

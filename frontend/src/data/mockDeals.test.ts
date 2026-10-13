@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { compareSemesters, mockDeals, nudgeFor, type Deal } from './mockDeals'
+import { calendarDaysBetween, compareSemesters, isUnpaid, mockDeals, nudgeFor, type Deal } from './mockDeals'
 
 const now = new Date('2026-10-13T12:00:00').getTime()
 const deal = (patch: Partial<Deal>): Deal => ({
@@ -32,4 +32,22 @@ test('finished and canceled deals never nudge', () => {
 
 test('sorts semesters newest first', () => {
   expect(['HT 2025', 'HT 2026', 'VT 2026'].sort(compareSemesters)).toEqual(['HT 2026', 'VT 2026', 'HT 2025'])
+})
+
+test('counts overdue days by calendar date, across a clock change', () => {
+  // Stockholm springs forward on 29 March 2026: the night of 29→30 March is 23 hours long.
+  expect(calendarDaysBetween('2026-03-29', '2026-03-30')).toBe(1)
+  expect(calendarDaysBetween('2026-03-28', '2026-03-31')).toBe(3)
+  const justAfterMidnight = new Date('2026-03-30T00:30:00').getTime()
+  expect(nudgeFor(deal({ nextStepDue: '2026-03-29' }), justAfterMidnight)).toEqual({ kind: 'overdue', days: 1 })
+})
+
+test('a confirmed fee is unpaid until marked paid or cancelled', () => {
+  const signed = (invoiceStatus: Deal['invoiceStatus']) => deal({ status: 'signed', feeSEK: 20_000, invoiceStatus })
+  expect(isUnpaid(signed(null))).toBe(true)
+  expect(isUnpaid(signed('not_sent'))).toBe(true)
+  expect(isUnpaid(signed('waiting'))).toBe(true)
+  expect(isUnpaid(signed('paid'))).toBe(false)
+  expect(isUnpaid(signed('cancelled'))).toBe(false)
+  expect(isUnpaid(deal({ status: 'discussing', feeSEK: 20_000, invoiceStatus: null }))).toBe(false)
 })

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import App from './App'
 
@@ -14,6 +14,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 const column = (label: string) => screen.getByRole('region', { name: label })
@@ -164,4 +165,95 @@ test('a new lead lands in Lead, owned by the signed-in user', async () => {
 
   expect(screen.getByRole('dialog', { name: 'Nordljus AB' })).toHaveTextContent('Dev User')
   expect(within(column('Lead')).getByText('Nordljus AB')).toBeInTheDocument()
+})
+
+test('a signed fee with no invoice status counts as unpaid', () => {
+  render(<App />)
+  open('Kvarnholmen AI')
+
+  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'signed' } })
+
+  expect(screen.getByText('Confirmed:')).toHaveTextContent('Confirmed: 60,000 SEK')
+  expect(screen.getByText('Unpaid:')).toHaveTextContent('Unpaid: 60,000 SEK')
+})
+
+test('New Lead waits for the signed-in user', async () => {
+  let signIn: (res: Response) => void = () => {}
+  vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((resolve) => (signIn = resolve))))
+  render(<App />)
+
+  expect(screen.getByRole('button', { name: 'New Lead' })).toBeDisabled()
+
+  signIn(new Response(JSON.stringify({ sub: 'dev', email: 'dev@kthais.com', name: 'Dev User' })))
+  await screen.findByText('Signed in as dev@kthais.com')
+  expect(screen.getByRole('button', { name: 'New Lead' })).toBeEnabled()
+})
+
+test('New Lead stays disabled when sign-in fails', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 500 })))
+  render(<App />)
+
+  await screen.findByText('Loading the signed-in user failed (500)')
+  expect(screen.getByRole('button', { name: 'New Lead' })).toBeDisabled()
+})
+
+test('a negative fee is ignored', () => {
+  render(<App />)
+  const drawer = open('Granit Consulting')
+
+  fireEvent.change(within(drawer).getByLabelText('Fee (SEK)'), { target: { value: '-1000' } })
+
+  expect(screen.getByText('Confirmed:')).toHaveTextContent('Confirmed: 40,000 SEK')
+})
+
+test('Send Email needs a contact email', async () => {
+  render(<App />)
+  await screen.findByText('Signed in as dev@kthais.com')
+  fireEvent.click(screen.getByRole('button', { name: 'New Lead' }))
+  const form = screen.getByRole('dialog', { name: 'New lead' })
+  fireEvent.change(within(form).getByLabelText('Company'), { target: { value: 'Nordljus AB' } })
+  fireEvent.change(within(form).getByLabelText('Contact name'), { target: { value: 'Kim Ek' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Add lead' }))
+
+  const drawer = screen.getByRole('dialog', { name: 'Nordljus AB' })
+  expect(within(drawer).queryByRole('link', { name: 'Send Email' })).not.toBeInTheDocument()
+  expect(within(drawer).getByText('No contact email')).toBeInTheDocument()
+})
+
+test('the drawer takes focus, keeps Tab inside, and returns focus on Escape', () => {
+  render(<App />)
+  card('Lumen Health').focus()
+  const drawer = open('Lumen Health')
+  expect(drawer).toHaveFocus()
+
+  const close = within(drawer).getByRole('button', { name: 'Close' })
+  fireEvent.keyDown(document, { key: 'Tab', shiftKey: true })
+  expect(drawer).not.toHaveFocus()
+  expect(drawer).toContainElement(document.activeElement as HTMLElement)
+
+  close.focus()
+  fireEvent.keyDown(document, { key: 'Escape' })
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(card('Lumen Health')).toHaveFocus()
+})
+
+test('the New Lead form focuses Company first', async () => {
+  render(<App />)
+  await screen.findByText('Signed in as dev@kthais.com')
+  fireEvent.click(screen.getByRole('button', { name: 'New Lead' }))
+
+  expect(screen.getByLabelText('Company')).toHaveFocus()
+})
+
+test('nudges update when the tab becomes visible again', () => {
+  vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] })
+  render(<App />)
+  expect(card('Vinga Voice')).not.toHaveTextContent('overdue')
+
+  vi.setSystemTime(Date.now() + 2 * 24 * 60 * 60 * 1000)
+  act(() => {
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+
+  expect(card('Vinga Voice')).toHaveTextContent('Next step overdue: 2 days')
 })

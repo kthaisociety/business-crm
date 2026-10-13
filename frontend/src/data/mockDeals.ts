@@ -102,18 +102,33 @@ export function today(now = new Date()): string {
   return new Date(now.getTime() - now.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
 }
 
+// Whole calendar days from one YYYY-MM-DD date to another. Counted on dates, not elapsed hours, so a
+// clock change (a 23- or 25-hour day) can't shift the count.
+export function calendarDaysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY)
+}
+
 export type Nudge = { kind: 'overdue' | 'inactive'; days: number }
 
 // Why an open deal needs attention, if it does: an overdue next step comes first, then inactivity.
 export function nudgeFor(deal: Deal, now = Date.now()): Nudge | null {
   if (!isOpen(deal)) return null
-  if (deal.nextStepDue && deal.nextStepDue < today(new Date(now))) {
-    return { kind: 'overdue', days: daysSince(`${deal.nextStepDue}T00:00:00`, now) }
+  const todayDate = today(new Date(now))
+  if (deal.nextStepDue && deal.nextStepDue < todayDate) {
+    return { kind: 'overdue', days: calendarDaysBetween(deal.nextStepDue, todayDate) }
   }
   const last = lastTouchpoint(deal)
   const idle = last ? daysSince(last, now) : 0
   return idle >= FOLLOW_UP_AFTER_DAYS ? { kind: 'inactive', days: idle } : null
 }
+
+// Signed or finished: the company has committed to the fee.
+export const isConfirmed = (deal: Deal) => deal.status === 'signed' || deal.status === 'finished'
+
+// A confirmed fee no one has recorded as paid (or cancelled). An invoice status left unset counts too:
+// nothing has been invoiced yet.
+export const isUnpaid = (deal: Deal) =>
+  isConfirmed(deal) && (deal.feeSEK ?? 0) > 0 && deal.invoiceStatus !== 'paid' && deal.invoiceStatus !== 'cancelled'
 
 export function statusLabel(status: Status): string {
   return STATUSES.find((s) => s.id === status)?.label ?? status

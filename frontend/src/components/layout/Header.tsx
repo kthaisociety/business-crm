@@ -10,12 +10,13 @@ type Props = {
   openDeals: number
   confirmedSEK: number
   unpaidSEK: number
+  canAddLead: boolean
   onNewLead: () => void
 }
 
 export default function Header(props: Props) {
-  const { semesters, semester, onSemesterChange, query, onQueryChange, openDeals, confirmedSEK, unpaidSEK, onNewLead } =
-    props
+  const { semesters, semester, onSemesterChange, query, onQueryChange, openDeals, confirmedSEK, unpaidSEK } = props
+  const { canAddLead, onNewLead } = props
 
   return (
     <header className="z-20 flex h-14 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6">
@@ -69,7 +70,9 @@ export default function Header(props: Props) {
         <button
           type="button"
           onClick={onNewLead}
-          className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-700"
+          disabled={!canAddLead}
+          title={canAddLead ? undefined : 'Available once you are signed in'}
+          className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Plus size={14} aria-hidden /> New Lead
         </button>
