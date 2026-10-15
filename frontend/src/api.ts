@@ -65,6 +65,8 @@ export type NewLeadInput = {
   nextStep: string
 }
 
+export const fetchDeal = (id: string) => call<Deal>('GET', `/api/deals/${encodeURIComponent(id)}`)
+
 export const createDeal = (lead: NewLeadInput) => call<Deal>('POST', '/api/deals', lead)
 
 // The fields the deal panel edits; the API rejects any other.

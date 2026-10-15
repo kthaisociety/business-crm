@@ -35,12 +35,14 @@ const id = (prefix: string) => `${prefix}-new-${nextId++}`
 
 type Body = Record<string, unknown>
 
-// `role` is the dev user's role on the team: admin unless a test says otherwise.
-export function stubApi(options: { me?: () => Promise<Response>; role?: Role } = {}): FakeApi {
+// `role` is the dev user's role on the team: admin unless a test says otherwise. With `firstSignIn`, the
+// dev user joins the team only when /api/me is first called, as the real server does.
+export function stubApi(options: { me?: () => Promise<Response>; role?: Role; firstSignIn?: boolean } = {}): FakeApi {
   const role = options.role ?? 'admin'
+  const team = structuredClone(fixtureMembers).map((m) => (m.id === devMember.id ? { ...m, role } : m))
   const api: FakeApi = {
     deals: structuredClone(fixtureDeals),
-    members: structuredClone(fixtureMembers).map((m) => (m.id === devMember.id ? { ...m, role } : m)),
+    members: options.firstSignIn ? team.filter((m) => m.id !== devMember.id) : team,
     companies: structuredClone(fixtureCompanies),
     contacts: structuredClone(fixtureContacts),
     requests: [],
@@ -82,7 +84,9 @@ export function stubApi(options: { me?: () => Promise<Response>; role?: Role } =
     if (failure) return error(failure.status, failure.error)
 
     if (method === 'GET' && path === '/api/me') {
-      return options.me ? options.me() : json({ ...devUser, memberId: devMember.id, role })
+      if (!api.members.some((m) => m.id === devMember.id)) api.members.push({ ...devMember, role })
+      const me = api.members.find((m) => m.id === devMember.id)!
+      return options.me ? options.me() : json({ ...devUser, memberId: me.id, role: me.role })
     }
     if (method === 'GET' && path === '/api/members') return json(api.members)
     if (method === 'GET' && path === '/api/deals') return json(api.deals)
@@ -224,6 +228,7 @@ export function stubApi(options: { me?: () => Promise<Response>; role?: Role } =
     const match = path.match(/^\/api\/deals\/([^/]+)(\/notes)?$/)
     const deal = match && api.deals.find((d) => d.id === decodeURIComponent(match[1]))
     if (match && !deal) return error(404, 'deal not found')
+    if (deal && method === 'GET' && !match[2]) return json(deal)
     if (deal && method === 'PATCH' && !match[2]) {
       const { contactId, ownerId, ...fields } = body
       if (ownerId !== undefined) {

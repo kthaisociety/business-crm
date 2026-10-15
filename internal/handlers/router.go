@@ -36,6 +36,7 @@ func NewRouter(d Deps) *gin.Engine {
 	signedIn.GET("/me", me(d.Deals))
 	signedIn.GET("/deals", listDeals(d.Deals))
 	signedIn.POST("/deals", createDeal(d.Deals))
+	signedIn.GET("/deals/:id", getDeal(d.Deals))
 	signedIn.PATCH("/deals/:id", updateDeal(d.Deals))
 	signedIn.POST("/deals/:id/notes", addNote(d.Deals))
 	registerCompanies(signedIn, d.Deals)

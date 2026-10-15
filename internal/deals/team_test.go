@@ -2,6 +2,7 @@ package deals_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -131,4 +132,53 @@ func TestLeadsCanStartUnassignedAndBeClaimedOrAssigned(t *testing.T) {
 	unknown := "00000000-0000-0000-0000-000000000001"
 	_, err = s.Create(ctx, deals.NewLead{OwnerID: &unknown, Company: "Vinga Voice", DealType: "Event", Semester: "HT 2026"}, alva)
 	validationError(t, err)
+}
+
+// Demoting or removing different admins at once, the team still keeps one.
+func TestConcurrentChangesKeepAnAdmin(t *testing.T) {
+	for _, removeSecond := range []bool{false, true} {
+		s := deals.NewStore(databasetest.Open(t))
+		ctx := context.Background()
+		var ids []string
+		for _, email := range []string{"a@example.com", "b@example.com"} {
+			m, err := s.AddMember(ctx, deals.MemberInput{Email: email, Name: email, Role: "admin"})
+			require.NoError(t, err)
+			ids = append(ids, m.ID)
+		}
+
+		var wg sync.WaitGroup
+		results := make([]error, 2)
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			_, results[0] = s.UpdateMember(ctx, ids[0], map[string]any{"role": "member"})
+		}()
+		go func() {
+			defer wg.Done()
+			if removeSecond {
+				results[1] = s.RemoveMember(ctx, ids[1])
+			} else {
+				_, results[1] = s.UpdateMember(ctx, ids[1], map[string]any{"role": "board"})
+			}
+		}()
+		wg.Wait()
+
+		failed := 0
+		for _, err := range results {
+			if err != nil {
+				conflictError(t, err)
+				failed++
+			}
+		}
+		assert.Equal(t, 1, failed, "exactly one change is refused")
+		team, err := s.ListMembers(ctx)
+		require.NoError(t, err)
+		admins := 0
+		for _, m := range team {
+			if m.Role == "admin" {
+				admins++
+			}
+		}
+		assert.Equal(t, 1, admins)
+	}
 }

@@ -10,6 +10,7 @@ import {
   deleteContact,
   fetchCompanies,
   fetchContacts,
+  fetchDeal,
   fetchDeals,
   fetchMe,
   fetchMembers,
@@ -101,6 +102,17 @@ export default function App() {
     return () => controller.abort()
   }, [])
 
+  // Signing in adds you to the team. A team list that arrived before that finished lacks you: fetch it again.
+  const missingMe = !!user?.memberId && !!data && !data.members.some((m) => m.id === user.memberId)
+  useEffect(() => {
+    if (!missingMe) return
+    fetchMembers()
+      .then((members) => setData((d) => d && { ...d, members }))
+      .catch(() => {
+        // The next refresh brings the team up to date.
+      })
+  }, [missingMe])
+
   // The server's latest version of each deal: a field whose save fails goes back to it.
   const serverDeals = useRef(new Map<string, Deal>())
   const remember = (deals: Deal[]) => {
@@ -173,6 +185,21 @@ export default function App() {
   const replaceDeal = (id: string, change: (deal: Deal) => Deal) =>
     setData((d) => d && { ...d, deals: d.deals.map((deal) => (deal.id === id ? change(deal) : deal)) })
 
+  // Reads one deal again and applies it, unless a newer answer for it has been applied meanwhile.
+  const refreshDeal = async (id: string) => {
+    const takenAt = edits.current.now()
+    const request = ++requests.current.count
+    try {
+      const fresh = await fetchDeal(id)
+      if ((requests.current.applied.get(id) ?? 0) > request) return
+      serverDeals.current.set(id, fresh)
+      applied([fresh], request)
+      replaceDeal(id, (deal) => edits.current.merge(fresh, deal, takenAt))
+    } catch {
+      // The next refresh brings the deal up to date.
+    }
+  }
+
   // Edits show at once and save in the background. A save's answer updates the deal, except fields edited
   // since. If a save fails, each field it changed goes back to the server's value, unless a newer edit has
   // changed that field since; the error shows above the board.
@@ -197,18 +224,15 @@ export default function App() {
       try {
         const saved = await updateDeal(id, patch)
         edits.current.doneSaving(id, keys)
-        // Overtaken by a newer answer (a refresh after someone renamed the company, say): only the fields
-        // this save set come from it.
-        const overtaken = (requests.current.applied.get(id) ?? 0) > request
-        const savedFields = Object.fromEntries(keys.map((key) => [key, saved[key]]))
-        if (overtaken) {
-          // The saved fields are still the server's latest: a later failed edit goes back to them.
-          serverDeals.current.set(id, { ...(serverDeals.current.get(id) ?? saved), ...savedFields })
+        if ((requests.current.applied.get(id) ?? 0) > request) {
+          // A newer answer was applied while this save was out (a refresh, say), so which of the two holds
+          // the server's latest values is unclear: read the deal again rather than guess.
+          void refreshDeal(id)
         } else {
           serverDeals.current.set(id, saved)
           applied([saved], request)
+          replaceDeal(id, (deal) => edits.current.merge(saved, deal, takenAt))
         }
-        replaceDeal(id, (deal) => edits.current.merge(overtaken ? { ...deal, ...savedFields } : saved, deal, takenAt))
       } catch (err) {
         edits.current.doneSaving(id, keys)
         const last = serverDeals.current.get(id) ?? before
@@ -272,6 +296,8 @@ export default function App() {
     },
     setRole: async (id, role) => {
       await updateMember(id, { role })
+      // Changing your own role changes what you can do here: Reports, and managing the team.
+      if (id === user?.memberId) setUser(await fetchMe())
       await reload()
     },
     remove: async (id) => {

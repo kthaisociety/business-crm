@@ -68,6 +68,10 @@ func TestDealLifecycle(t *testing.T) {
 	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 	assert.Equal(t, "Intro call booked", decode[deals.ActivityView](t, w).Body)
 
+	one := decode[deals.View](t, get(r, "/api/deals/"+created.ID))
+	assert.Equal(t, "discussing", one.Status)
+	assert.Equal(t, http.StatusNotFound, get(r, "/api/deals/00000000-0000-0000-0000-000000000000").Code)
+
 	list := decode[[]deals.View](t, get(r, "/api/deals"))
 	require.Len(t, list, 1)
 	assert.Equal(t, "discussing", list[0].Status)

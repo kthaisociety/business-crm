@@ -967,3 +967,53 @@ test('a note shows once when another answer brings it first', async () => {
   await waitFor(() => expect(within(drawer).getByLabelText('Quick note')).toHaveValue(''))
   expect(within(drawer).getAllByText('Called them')).toHaveLength(1)
 })
+
+test('on a first sign-in, the team includes you once signing in has added you', async () => {
+  api = stubApi({ firstSignIn: true })
+  const signIn = api.hold('GET', /^\/api\/me$/, { late: true })
+  renderAt('/team')
+  await screen.findByText('Iris Wallin')
+  expect(screen.queryByText('Dev User')).not.toBeInTheDocument()
+
+  await act(() => signIn.release())
+
+  expect(await screen.findByText('Dev User')).toBeInTheDocument()
+})
+
+test('changing your own role changes what you can do at once', async () => {
+  renderAt('/team')
+  const me = (await screen.findByText('Dev User')).closest('tr')!
+  expect(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Reports' })).toBeInTheDocument()
+
+  fireEvent.change(within(me).getByLabelText('Role of Dev User'), { target: { value: 'member' } })
+
+  await waitFor(() =>
+    expect(within(screen.getByRole('navigation', { name: 'Main' })).queryByRole('link', { name: 'Reports' })).not.toBeInTheDocument(),
+  )
+  expect(screen.queryByRole('button', { name: 'Add member' })).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('Role of Iris Wallin')).not.toBeInTheDocument()
+})
+
+test('a failed edit goes back to a teammate’s newer value, not an overtaken save', async () => {
+  const save = api.hold('PATCH', /^\/api\/deals\/lumen$/)
+  await renderApp()
+  open('Lumen Health')
+  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'discussing' } })
+  fireEvent.keyDown(document, { key: 'Escape' })
+  await waitFor(() => expect(patches()).toHaveLength(1))
+
+  // A teammate moves the deal on, and a refresh reads that before the save's answer arrives.
+  api.deals.find((d) => d.id === 'lumen')!.status = 'agreement'
+  await addLead({ Company: 'Nordljus AB' })
+  await screen.findByRole('dialog', { name: 'Nordljus AB' })
+  fireEvent.keyDown(document, { key: 'Escape' })
+  await act(() => save.release())
+  await waitFor(() => expect(within(column('Agreement')).getByText('Lumen Health')).toBeInTheDocument())
+
+  api.failOnce('PATCH', /^\/api\/deals\/lumen$/)
+  open('Lumen Health')
+  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'signed' } })
+
+  expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't save Lumen Health")
+  expect(screen.getByLabelText('Status')).toHaveValue('agreement')
+})

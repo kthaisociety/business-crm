@@ -93,3 +93,44 @@ func assertNoColumn(t *testing.T, db *gorm.DB, table, column string) {
 	t.Helper()
 	assert.False(t, db.Migrator().HasColumn(table, column), "%s.%s should be gone", table, column)
 }
+
+// 00003 lowercases member emails. Members whose emails differ only in case are one person: they're merged
+// into the earliest, with their deals, support and notes, so the migration can't fail on a duplicate.
+func TestMemberRolesMigrationMergesEmailsThatDifferOnlyInCase(t *testing.T) {
+	ctx := context.Background()
+	db := databasetest.OpenEmpty(t)
+	upTo2 := migrationsUpTo(t, "00001_create_deals.sql", "00002_create_companies_and_contacts.sql")
+	require.NoError(t, database.MigrateFS(ctx, db, upTo2))
+
+	exec := func(sql string, args ...any) { require.NoError(t, db.Exec(sql, args...).Error) }
+	exec(`INSERT INTO members (id, email, name, created_at) VALUES
+		('a0000000-0000-0000-0000-000000000001', 'Alva@example.com', 'Alva', now() - interval '1 day'),
+		('a0000000-0000-0000-0000-000000000002', 'alva@example.com', 'Alva L', now()),
+		('a0000000-0000-0000-0000-000000000003', 'oskar@example.com', 'Oskar', now())`)
+	exec(`INSERT INTO companies (id, name) VALUES ('c0000000-0000-0000-0000-000000000001', 'Granit')`)
+	exec(`INSERT INTO deals (id, company_id, deal_type, semester, owner_id) VALUES
+		('d0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000001', 'Event', 'HT 2026', 'a0000000-0000-0000-0000-000000000002')`)
+	exec(`INSERT INTO deal_support (deal_id, member_id) VALUES
+		('d0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001'),
+		('d0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000002'),
+		('d0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000003')`)
+	exec(`INSERT INTO activities (deal_id, type, title, author_id) VALUES
+		('d0000000-0000-0000-0000-000000000001', 'note', 'Called', 'a0000000-0000-0000-0000-000000000002')`)
+
+	all := migrationsUpTo(t, "00001_create_deals.sql", "00002_create_companies_and_contacts.sql", "00003_add_member_roles.sql")
+	require.NoError(t, database.MigrateFS(ctx, db, all))
+
+	var emails []string
+	require.NoError(t, db.Raw(`SELECT email FROM members ORDER BY email`).Scan(&emails).Error)
+	assert.Equal(t, []string{"alva@example.com", "oskar@example.com"}, emails)
+
+	keep := "a0000000-0000-0000-0000-000000000001" // the earliest
+	var owner, author string
+	require.NoError(t, db.Raw(`SELECT owner_id FROM deals`).Scan(&owner).Error)
+	require.NoError(t, db.Raw(`SELECT author_id FROM activities`).Scan(&author).Error)
+	assert.Equal(t, keep, owner)
+	assert.Equal(t, keep, author)
+	var support []string
+	require.NoError(t, db.Raw(`SELECT member_id FROM deal_support ORDER BY member_id`).Scan(&support).Error)
+	assert.Equal(t, []string{keep, "a0000000-0000-0000-0000-000000000003"}, support)
+}

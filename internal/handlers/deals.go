@@ -52,6 +52,17 @@ func listDeals(store *deals.Store) gin.HandlerFunc {
 	}
 }
 
+func getDeal(store *deals.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		deal, err := store.Get(c.Request.Context(), c.Param("id"))
+		if err != nil {
+			fail(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, deal)
+	}
+}
+
 func createDeal(store *deals.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		body, ok := readBody(c)

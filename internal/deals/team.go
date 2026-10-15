@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/kthaisociety/business-crm/internal/auth"
 )
@@ -121,8 +122,8 @@ func (s *Store) UpdateMember(ctx context.Context, id string, cols map[string]any
 		} else if err != nil {
 			return err
 		}
-		if role, ok := cols["role"].(string); ok && m.Role == "admin" && role != "admin" {
-			if err := keepAnAdmin(tx); err != nil {
+		if role, ok := cols["role"].(string); ok && role != "admin" {
+			if err := keepAnAdmin(tx, id); err != nil {
 				return err
 			}
 		}
@@ -147,10 +148,8 @@ func (s *Store) RemoveMember(ctx context.Context, id string) error {
 		} else if err != nil {
 			return err
 		}
-		if m.Role == "admin" {
-			if err := keepAnAdmin(tx); err != nil {
-				return err
-			}
+		if err := keepAnAdmin(tx, id); err != nil {
+			return err
 		}
 		var owned, supported, authored int64
 		if err := tx.Model(&Deal{}).Where("owner_id = ?", id).Count(&owned).Error; err != nil {
@@ -175,13 +174,17 @@ func (s *Store) RemoveMember(ctx context.Context, id string) error {
 	})
 }
 
-// keepAnAdmin refuses a change that would leave the team without an admin.
-func keepAnAdmin(tx *gorm.DB) error {
-	var admins int64
-	if err := tx.Model(&Member{}).Where("role = 'admin'").Count(&admins).Error; err != nil {
+// keepAnAdmin refuses demoting or removing the member with this id if they're the last admin. It locks
+// the admins' rows until the transaction ends, so two requests demoting or removing different admins at
+// once take turns: the second sees the first's change, and can't leave the team without an admin.
+func keepAnAdmin(tx *gorm.DB, id string) error {
+	var admins []Member
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("role = 'admin'").Order("id").Find(&admins).Error
+	if err != nil {
 		return err
 	}
-	if admins <= 1 {
+	isAdmin := slices.ContainsFunc(admins, func(m Member) bool { return m.ID == id })
+	if isAdmin && len(admins) == 1 {
 		return conflict("the team needs at least one admin")
 	}
 	return nil
