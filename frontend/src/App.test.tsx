@@ -1017,3 +1017,49 @@ test('a failed edit goes back to a teammate’s newer value, not an overtaken sa
   expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't save Lumen Health")
   expect(screen.getByLabelText('Status')).toHaveValue('agreement')
 })
+
+test('on a first sign-in, a late team list doesn’t replace a newer one', async () => {
+  api = stubApi({ firstSignIn: true })
+  const signIn = api.hold('GET', /^\/api\/me$/, { late: true })
+  renderAt('/team')
+  await screen.findByText('Iris Wallin')
+  const lateTeam = api.hold('GET', /^\/api\/members$/, { once: true })
+  await act(() => signIn.release())
+  await waitFor(() => expect(api.requests.filter((r) => r.path === '/api/members')).toHaveLength(2))
+
+  // An admin adds someone, and the reload after it is answered before the list asked for on sign-in.
+  fireEvent.click(screen.getByRole('button', { name: 'Add member' }))
+  const form = await dialogNamed('Add member')
+  fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'Mia Lind' } })
+  fireEvent.change(within(form).getByLabelText('Email'), { target: { value: 'mia@example.com' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Add member' }))
+  await screen.findByText('Mia Lind')
+  await act(() => lateTeam.release())
+  await settle()
+
+  expect(screen.getByText('Mia Lind')).toBeInTheDocument()
+})
+
+test('a failed edit reads the deal again when the last save’s value is unknown', async () => {
+  const save = api.hold('PATCH', /^\/api\/deals\/lumen$/, { late: true })
+  await renderApp()
+  open('Lumen Health')
+  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'discussing' } })
+  fireEvent.keyDown(document, { key: 'Escape' })
+
+  // A refresh reads before the save commits and is answered first; reading the deal again then fails.
+  await addLead({ Company: 'Nordljus AB' })
+  await screen.findByRole('dialog', { name: 'Nordljus AB' })
+  fireEvent.keyDown(document, { key: 'Escape' })
+  api.failOnce('GET', /^\/api\/deals\/lumen$/)
+  await act(() => save.release())
+  expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't refresh Lumen Health")
+  expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument()
+
+  api.failOnce('PATCH', /^\/api\/deals\/lumen$/)
+  open('Lumen Health')
+  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'signed' } })
+
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent("Couldn't save Lumen Health"))
+  await waitFor(() => expect(screen.getByLabelText('Status')).toHaveValue('discussing'))
+})

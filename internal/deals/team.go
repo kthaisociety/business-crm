@@ -176,10 +176,12 @@ func (s *Store) RemoveMember(ctx context.Context, id string) error {
 
 // keepAnAdmin refuses demoting or removing the member with this id if they're the last admin. It locks
 // the admins' rows until the transaction ends, so two requests demoting or removing different admins at
-// once take turns: the second sees the first's change, and can't leave the team without an admin.
+// once take turns: the second sees the first's change, and can't leave the team without an admin. The lock
+// is FOR NO KEY UPDATE, which lets a new deal's foreign-key check on an admin through: FOR UPDATE would
+// wait for it, and deadlock with a lead whose author is another admin.
 func keepAnAdmin(tx *gorm.DB, id string) error {
 	var admins []Member
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("role = 'admin'").Order("id").Find(&admins).Error
+	err := tx.Clauses(clause.Locking{Strength: "NO KEY UPDATE"}).Where("role = 'admin'").Order("id").Find(&admins).Error
 	if err != nil {
 		return err
 	}

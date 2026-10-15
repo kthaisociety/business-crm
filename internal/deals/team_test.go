@@ -2,8 +2,10 @@ package deals_test
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -181,4 +183,42 @@ func TestConcurrentChangesKeepAnAdmin(t *testing.T) {
 		}
 		assert.Equal(t, 1, admins)
 	}
+}
+
+// A lead's transaction locks its author's row on sign-in, then its owner's key when it inserts the deal. A
+// team change in between, which locks the admins, must not deadlock with it.
+func TestTeamChangesDoNotDeadlockWithNewLeads(t *testing.T) {
+	db := databasetest.Open(t)
+	s := deals.NewStore(db)
+	ctx := context.Background()
+	var ids []string
+	for _, email := range []string{"a@example.com", "b@example.com"} {
+		m, err := s.AddMember(ctx, deals.MemberInput{Email: email, Name: email, Role: "admin"})
+		require.NoError(t, err)
+		ids = append(ids, m.ID)
+	}
+	slices.Sort(ids)
+	owner, author := ids[0], ids[1]
+	other, err := s.AddMember(ctx, deals.MemberInput{Email: "c@example.com", Name: "C", Role: "member"})
+	require.NoError(t, err)
+
+	// What Create does: the author's upsert, then the deal's foreign-key check on its owner.
+	lead := db.Begin()
+	defer lead.Rollback()
+	require.NoError(t, lead.Exec("UPDATE members SET name = name WHERE id = ?", author).Error)
+
+	changed := make(chan error, 1)
+	go func() {
+		_, err := s.UpdateMember(ctx, other.ID, map[string]any{"role": "board"})
+		changed <- err
+	}()
+	require.Eventually(t, func() bool {
+		var waiting int64
+		db.Raw("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()").Scan(&waiting)
+		return waiting > 0
+	}, 5*time.Second, 10*time.Millisecond, "the team change waits for the author's row")
+
+	require.NoError(t, lead.Exec("SELECT 1 FROM members WHERE id = ? FOR KEY SHARE", owner).Error)
+	require.NoError(t, lead.Commit().Error)
+	assert.NoError(t, <-changed)
 }

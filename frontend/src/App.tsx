@@ -102,12 +102,19 @@ export default function App() {
     return () => controller.abort()
   }, [])
 
+  // Reloads of everything, numbered: only the latest one's answer applies.
+  const reloads = useRef(0)
+
   // Signing in adds you to the team. A team list that arrived before that finished lacks you: fetch it again.
   const missingMe = !!user?.memberId && !!data && !data.members.some((m) => m.id === user.memberId)
   useEffect(() => {
     if (!missingMe) return
+    const ticket = reloads.current
     fetchMembers()
-      .then((members) => setData((d) => d && { ...d, members }))
+      .then((members) => {
+        // A reload started since brings a newer list.
+        if (ticket === reloads.current) setData((d) => d && { ...d, members })
+      })
       .catch(() => {
         // The next refresh brings the team up to date.
       })
@@ -123,9 +130,13 @@ export default function App() {
   // Requests for deals, numbered as they go out, and per deal the newest one whose answer was applied, so
   // an answer that was overtaken by a newer one can't bring back older shared details.
   const requests = useRef({ count: 0, applied: new Map<string, number>() })
+  // Deals whose server version is unknown, because a save was overtaken and reading the deal again failed,
+  // with the number of the last request out then: any answer to a later request is up to date.
+  const unsure = useRef(new Map<string, number>())
   const applied = (deals: Deal[], request: number) => {
     for (const deal of deals) {
       requests.current.applied.set(deal.id, Math.max(request, requests.current.applied.get(deal.id) ?? 0))
+      if (request > (unsure.current.get(deal.id) ?? Infinity)) unsure.current.delete(deal.id)
     }
   }
 
@@ -152,7 +163,6 @@ export default function App() {
   // Saves to one deal go out one at a time, in the order they were made, so the server ends up with the
   // last edit.
   const saveQueue = useRef(new Map<string, Promise<void>>())
-  const reloads = useRef(0)
 
   // After a change that shows in more than one place (a company's name is on its deals, a new lead may
   // add a company and contact), everything reloads. Only the latest reload applies, and in each deal it
@@ -185,18 +195,23 @@ export default function App() {
   const replaceDeal = (id: string, change: (deal: Deal) => Deal) =>
     setData((d) => d && { ...d, deals: d.deals.map((deal) => (deal.id === id ? change(deal) : deal)) })
 
-  // Reads one deal again and applies it, unless a newer answer for it has been applied meanwhile.
-  const refreshDeal = async (id: string) => {
+  // Reads one deal again and applies it, unless a newer answer for it has been applied meanwhile. If
+  // that fails, the deal's server version is unknown until an answer asked for later arrives, and the
+  // notice offers to read it again. Resolves to whether the read worked.
+  const refreshDeal = async (id: string, company: string): Promise<boolean> => {
     const takenAt = edits.current.now()
     const request = ++requests.current.count
     try {
       const fresh = await fetchDeal(id)
-      if ((requests.current.applied.get(id) ?? 0) > request) return
+      if ((requests.current.applied.get(id) ?? 0) > request) return true
       serverDeals.current.set(id, fresh)
       applied([fresh], request)
       replaceDeal(id, (deal) => edits.current.merge(fresh, deal, takenAt))
-    } catch {
-      // The next refresh brings the deal up to date.
+      return true
+    } catch (err) {
+      unsure.current.set(id, requests.current.count)
+      setNotice({ message: `Couldn't refresh ${company}: ${messageOf(err)}`, retry: () => void refreshDeal(id, company) })
+      return false
     }
   }
 
@@ -227,7 +242,7 @@ export default function App() {
         if ((requests.current.applied.get(id) ?? 0) > request) {
           // A newer answer was applied while this save was out (a refresh, say), so which of the two holds
           // the server's latest values is unclear: read the deal again rather than guess.
-          void refreshDeal(id)
+          void refreshDeal(id, before.company)
         } else {
           serverDeals.current.set(id, saved)
           applied([saved], request)
@@ -235,13 +250,20 @@ export default function App() {
         }
       } catch (err) {
         edits.current.doneSaving(id, keys)
+        // Without a known server version to go back to, read the deal again; failing that, use the last known.
+        if (unsure.current.has(id) && (await refreshDeal(id, before.company))) {
+          setNotice({ message: `Couldn't save ${before.company}: ${messageOf(err)}` })
+          return
+        }
         const last = serverDeals.current.get(id) ?? before
         replaceDeal(id, (deal) => {
           const reverted = { ...deal }
           for (const key of keys) if (edits.current.isLatest(id, key, edit)) Object.assign(reverted, { [key]: last[key] })
           return reverted
         })
-        setNotice({ message: `Couldn't save ${before.company}: ${messageOf(err)}` })
+        // If the deal's server version is still unknown, the notice offers to read it again.
+        const retry = unsure.current.has(id) ? () => void refreshDeal(id, before.company) : undefined
+        setNotice({ message: `Couldn't save ${before.company}: ${messageOf(err)}`, retry })
       }
     }
     const queued = (saveQueue.current.get(id) ?? Promise.resolve()).then(send)
