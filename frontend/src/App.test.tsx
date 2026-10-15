@@ -759,3 +759,46 @@ test('a form can’t be closed while it deletes', async () => {
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   expect(screen.queryByRole('button', { name: 'Aurora AB' })).not.toBeInTheDocument()
 })
+
+test('a contact edited elsewhere shows on a deal that’s still saving', async () => {
+  const saving = api.hold('PATCH', /^\/api\/deals\/granit$/)
+  await renderApp()
+  open('Granit Consulting')
+  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'finished' } })
+  fireEvent.keyDown(document, { key: 'Escape' })
+
+  goTo('Contacts')
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Lina Dahl' }))
+  const form = await dialogNamed('Edit Lina Dahl')
+  fireEvent.change(within(form).getByLabelText('Email'), { target: { value: 'lina@granit.example.com' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  await act(() => saving.release())
+
+  goTo('Pipeline')
+  const drawer = open('Granit Consulting')
+  expect(within(drawer).getByLabelText('Status')).toHaveValue('finished')
+  expect(within(drawer).getByRole('link', { name: 'Send Email' })).toHaveAttribute(
+    'href',
+    expect.stringMatching(/^mailto:lina@granit\.example\.com\?/),
+  )
+})
+
+test('a refresh that fails after a save can be retried on its own', async () => {
+  renderAt('/companies')
+  await screen.findByRole('button', { name: 'Granit Consulting' })
+  api.failOnce('GET', /^\/api\/companies$/)
+
+  fireEvent.click(screen.getByRole('button', { name: 'New company' }))
+  const form = await dialogNamed('New company')
+  fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'Aurora AB' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Add company' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't refresh")
+  expect(screen.queryByRole('button', { name: 'Aurora AB' })).not.toBeInTheDocument()
+  const posts = api.requests.filter((r) => r.method === 'POST').length
+
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+  expect(await screen.findByRole('button', { name: 'Aurora AB' })).toBeInTheDocument()
+  expect(api.requests.filter((r) => r.method === 'POST')).toHaveLength(posts) // the company isn't added twice
+})
