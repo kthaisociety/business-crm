@@ -1,6 +1,5 @@
-// Companies, contacts and semester reports, worked out from the deals. Until companies and contacts get
-// tables of their own (internal/database/migrations), a company is every deal with the same name and a
-// contact is every deal with the same contact email.
+// Companies, contacts and semester reports, with each company's and contact's deals gathered from the
+// deal list.
 import {
   STATUSES,
   compareSemesters,
@@ -9,6 +8,8 @@ import {
   isUnpaid,
   lastTouchpoint,
   nudgeFor,
+  type Company,
+  type Contact,
   type Deal,
   type DealType,
   type Person,
@@ -23,8 +24,18 @@ const sumFees = (deals: Deal[]) => deals.reduce((sum, d) => sum + (d.feeSEK ?? 0
 // Newest semester first; within one, the most recently added first.
 const newestFirst = (a: Deal, b: Deal) => compareSemesters(a.semester, b.semester) || b.createdAt.localeCompare(a.createdAt)
 
-export type Company = {
-  name: string
+function groupBy(deals: Deal[], key: (d: Deal) => string | undefined): Map<string, Deal[]> {
+  const groups = new Map<string, Deal[]>()
+  for (const deal of deals) {
+    const k = key(deal)
+    if (k) groups.set(k, [...(groups.get(k) ?? []), deal])
+  }
+  return groups
+}
+
+export type CompanyRow = {
+  company: Company
+  contacts: Contact[]
   deals: Deal[] // newest semester first
   open: number
   confirmedSEK: number
@@ -32,19 +43,16 @@ export type Company = {
   lastTouchpoint: string | null
 }
 
-export function companiesFrom(deals: Deal[]): Company[] {
-  const groups = new Map<string, Deal[]>()
-  for (const deal of deals) {
-    const key = deal.company.trim().toLowerCase()
-    groups.set(key, [...(groups.get(key) ?? []), deal])
-  }
-  return [...groups.values()]
-    .map((group) => {
-      const sorted = [...group].sort(newestFirst)
+export function companiesFrom(companies: Company[], contacts: Contact[], deals: Deal[]): CompanyRow[] {
+  const dealsBy = groupBy(deals, (d) => d.companyId)
+  return companies
+    .map((company) => {
+      const sorted = [...(dealsBy.get(company.id) ?? [])].sort(newestFirst)
       const owners = new Map<string, Person>()
       for (const d of sorted) if (d.owner) owners.set(d.owner.id, d.owner)
       return {
-        name: sorted[0].company,
+        company,
+        contacts: contacts.filter((c) => c.companyId === company.id),
         deals: sorted,
         open: sorted.filter(isOpen).length,
         confirmedSEK: sumFees(sorted.filter(isConfirmed)),
@@ -52,40 +60,30 @@ export function companiesFrom(deals: Deal[]): Company[] {
         lastTouchpoint: latestOf(sorted.map(lastTouchpoint)),
       }
     })
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort((a, b) => a.company.name.localeCompare(b.company.name))
 }
 
 export type ContactRow = {
-  name: string
-  email: string
-  role: string
+  contact: Contact
   company: string
   deals: Deal[] // newest semester first
   lastTouchpoint: string | null
 }
 
-export function contactsFrom(deals: Deal[]): ContactRow[] {
-  const groups = new Map<string, Deal[]>()
-  for (const deal of deals) {
-    if (!deal.contact) continue
-    // Without an email, the same name at the same company is the same person.
-    const key = deal.contact.email.trim().toLowerCase() || `${deal.contact.name}|${deal.company}`.toLowerCase()
-    groups.set(key, [...(groups.get(key) ?? []), deal])
-  }
-  return [...groups.values()]
-    .map((group) => {
-      const sorted = [...group].sort(newestFirst)
-      const latest = sorted[0]
+export function contactsFrom(contacts: Contact[], companies: Company[], deals: Deal[]): ContactRow[] {
+  const dealsBy = groupBy(deals, (d) => d.contact?.id)
+  const companyName = new Map(companies.map((c) => [c.id, c.name]))
+  return contacts
+    .map((contact) => {
+      const sorted = [...(dealsBy.get(contact.id) ?? [])].sort(newestFirst)
       return {
-        name: latest.contact!.name || latest.contact!.email,
-        email: latest.contact!.email,
-        role: latest.contact!.role,
-        company: latest.company,
+        contact,
+        company: companyName.get(contact.companyId) ?? '',
         deals: sorted,
         lastTouchpoint: latestOf(sorted.map(lastTouchpoint)),
       }
     })
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .sort((a, b) => (a.contact.name || a.contact.email).localeCompare(b.contact.name || b.contact.email))
 }
 
 export type Bar = { label: string; value: number }

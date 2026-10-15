@@ -1,31 +1,29 @@
 import { expect, test } from 'vitest'
-import { fixtureDeals, lastSemester, thisSemester } from '../test/fixtures'
+import { fixtureCompanies, fixtureContacts, fixtureDeals, lastSemester, thisSemester } from '../test/fixtures'
 import { companiesFrom, contactsFrom, reportFor } from './views'
 
-test('a company gathers its deals from every semester, newest first', () => {
-  const granit = companiesFrom(fixtureDeals).find((c) => c.name === 'Granit Consulting')!
+test('a company gathers its deals from every semester, newest first, and its contacts', () => {
+  const granit = companiesFrom(fixtureCompanies, fixtureContacts, fixtureDeals).find((r) => r.company.name === 'Granit Consulting')!
 
   expect(granit.deals.map((d) => d.semester)).toEqual([thisSemester, lastSemester])
   expect(granit.confirmedSEK).toBe(55_000)
   expect(granit.open).toBe(1)
   expect(granit.owners.map((p) => p.name)).toEqual(['Maja Holm'])
+  expect(granit.contacts.map((c) => c.name)).toEqual(['Lina Dahl'])
 })
 
-test('companies with the same name in different case are one company', () => {
-  const deals = [fixtureDeals[0], { ...fixtureDeals[1], company: fixtureDeals[0].company.toUpperCase() }]
+test('a company without deals is still listed', () => {
+  const rows = companiesFrom([...fixtureCompanies, { id: 'c-new', name: 'Aurora AB', website: '', notes: '' }], fixtureContacts, fixtureDeals)
 
-  expect(companiesFrom(deals)).toHaveLength(1)
+  expect(rows.find((r) => r.company.name === 'Aurora AB')).toMatchObject({ company: { name: 'Aurora AB' }, deals: [], open: 0, lastTouchpoint: null })
 })
 
-test('contacts come from deals, one per email', () => {
-  const contacts = contactsFrom(fixtureDeals)
+test('contacts list their company and deals', () => {
+  const lina = contactsFrom(fixtureContacts, fixtureCompanies, fixtureDeals).find((r) => r.contact.email === 'lina.dahl@example.com')!
 
-  expect(contacts.find((c) => c.email === 'lina.dahl@example.com')).toMatchObject({
-    name: 'Lina Dahl',
-    company: 'Granit Consulting',
-    role: 'Recruitment Manager',
-  })
-  expect(new Set(contacts.map((c) => c.email)).size).toBe(contacts.length)
+  expect(lina.company).toBe('Granit Consulting')
+  expect(lina.contact.role).toBe('Recruitment Manager')
+  expect(lina.deals.map((d) => d.company)).toEqual(['Granit Consulting'])
 })
 
 test('a semester report adds up fees, wins and follow-ups', () => {
@@ -50,10 +48,11 @@ test('a semester with nothing decided has no win rate', () => {
 })
 
 test('within a semester, the most recently added deal comes first', () => {
-  const older = { ...fixtureDeals[0], id: 'older', company: 'Nordljus AB', createdAt: '2026-09-01T00:00:00Z' }
+  const older = { ...fixtureDeals[0], id: 'older', createdAt: '2026-09-01T00:00:00Z' }
   const newer = { ...older, id: 'newer', createdAt: '2026-10-01T00:00:00Z' }
+  const company = fixtureCompanies.find((c) => c.id === older.companyId)!
 
-  expect(companiesFrom([older, newer])[0].deals.map((d) => d.id)).toEqual(['newer', 'older'])
+  expect(companiesFrom([company], [], [older, newer])[0].deals.map((d) => d.id)).toEqual(['newer', 'older'])
 })
 
 test('reports count teammates who share a name separately', () => {

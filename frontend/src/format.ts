@@ -21,3 +21,7 @@ export function initialsOf(name: string): string {
     .map((part) => part[0].toUpperCase())
     .join('')
 }
+
+export function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}

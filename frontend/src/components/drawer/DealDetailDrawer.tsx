@@ -8,6 +8,7 @@ import {
   nudgeFor,
   statusLabel,
   type Activity,
+  type Contact,
   type Deal,
   type InvoiceStatus,
   type Status,
@@ -21,6 +22,7 @@ import OwnerAvatar from '../OwnerAvatar'
 type Props = {
   deal: Deal
   otherDeals: Deal[] // earlier or parallel deals with the same company
+  companyContacts: Contact[] // who the deal's contact can be
   onClose: () => void
   onChange: (patch: DealPatch) => void
   onAddNote: (text: string) => Promise<void>
@@ -46,7 +48,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
-export default function DealDetailDrawer({ deal, otherDeals, onClose, onChange, onAddNote, onSelect }: Props) {
+export default function DealDetailDrawer({ deal, otherDeals, companyContacts, onClose, onChange, onAddNote, onSelect }: Props) {
   const [note, setNote] = useState('')
   const [savingNote, setSavingNote] = useState(false)
   const [noteError, setNoteError] = useState<string | null>(null)
@@ -202,15 +204,23 @@ export default function DealDetailDrawer({ deal, otherDeals, onClose, onChange, 
             </Row>
             {deal.support.length > 0 && <Row label="Support">{deal.support.map((p) => p.name).join(', ')}</Row>}
             <Row label="Contact">
-              {deal.contact ? (
-                <>
-                  {deal.contact.name}
-                  {deal.contact.role && <span className="text-gray-500"> · {deal.contact.role}</span>}
-                  <br />
-                  <span className="text-gray-500">{deal.contact.email}</span>
-                </>
-              ) : (
-                <span className="text-gray-400">—</span>
+              <select
+                aria-label="Contact"
+                value={deal.contact?.id ?? ''}
+                onChange={(e) => onChange({ contactId: e.target.value || null })}
+                className={`${field} w-auto max-w-full`}
+              >
+                <option value="">No contact</option>
+                {companyContacts.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name || c.email}
+                  </option>
+                ))}
+              </select>
+              {deal.contact && (deal.contact.role || deal.contact.email) && (
+                <p className="mt-0.5 text-gray-500">
+                  {[deal.contact.role, deal.contact.email].filter(Boolean).join(' · ')}
+                </p>
               )}
             </Row>
             <Row label="Date">{formatDateRange(deal.startDate, deal.endDate) || <span className="text-gray-400">TBA</span>}</Row>

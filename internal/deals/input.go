@@ -29,39 +29,151 @@ func invalid(format string, args ...any) error {
 	return &ValidationError{msg: fmt.Sprintf(format, args...)}
 }
 
-// NewLead is what a member fills in to add a lead.
-type NewLead struct {
-	Company      string `json:"company"`
-	DealType     string `json:"dealType"`
-	Semester     string `json:"semester"`
-	ContactName  string `json:"contactName"`
-	ContactEmail string `json:"contactEmail"`
-	ContactRole  string `json:"contactRole"`
-	NextStep     string `json:"nextStep"`
+// ConflictError is a request that clashes with what's stored (a name or email already taken, a delete
+// that would orphan deals); the API answers 409 with its message.
+type ConflictError struct{ msg string }
+
+func (e *ConflictError) Error() string { return e.msg }
+
+func conflict(format string, args ...any) error {
+	return &ConflictError{msg: fmt.Sprintf(format, args...)}
 }
 
-func (n *NewLead) validate() error {
-	n.Company = strings.TrimSpace(n.Company)
-	n.ContactName = strings.TrimSpace(n.ContactName)
-	n.ContactEmail = strings.TrimSpace(n.ContactEmail)
-	n.ContactRole = strings.TrimSpace(n.ContactRole)
-	n.NextStep = strings.TrimSpace(n.NextStep)
-	switch {
-	case n.Company == "":
-		return invalid("company is required")
-	case !slices.Contains(dealTypes, n.DealType):
-		return invalid("dealType must be one of %s", strings.Join(dealTypes, ", "))
-	case !semesterPattern.MatchString(n.Semester):
-		return invalid(`semester must look like "HT 2026" or "VT 2026"`)
-	case n.ContactEmail != "" && !strings.Contains(n.ContactEmail, "@"):
-		return invalid("contactEmail is not an email address")
-	}
-	for _, s := range []string{n.Company, n.ContactName, n.ContactEmail, n.ContactRole, n.NextStep} {
+func tooLong(fields ...string) error {
+	for _, s := range fields {
 		if len(s) > maxText {
 			return invalid("fields are limited to %d characters", maxText)
 		}
 	}
 	return nil
+}
+
+// ContactInput is a contact's details, for a new contact or a new lead's contact.
+type ContactInput struct {
+	CompanyID string `json:"companyId"`
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	Role      string `json:"role"`
+}
+
+func (c *ContactInput) validate() error {
+	c.Name = strings.TrimSpace(c.Name)
+	c.Email = strings.TrimSpace(c.Email)
+	c.Role = strings.TrimSpace(c.Role)
+	switch {
+	case c.Name == "" && c.Email == "":
+		return invalid("a contact needs a name or an email")
+	case c.Email != "" && !strings.Contains(c.Email, "@"):
+		return invalid("%q is not an email address", c.Email)
+	}
+	return tooLong(c.Name, c.Email, c.Role)
+}
+
+// NewLead is what a member fills in to add a lead. The company is an existing one (CompanyID) or a new one
+// by name (Company), which reuses a company of that name if there is one. The contact is likewise an
+// existing one (ContactID), a new one (Contact), or none.
+type NewLead struct {
+	CompanyID string        `json:"companyId"`
+	Company   string        `json:"company"`
+	ContactID string        `json:"contactId"`
+	Contact   *ContactInput `json:"contact"`
+	DealType  string        `json:"dealType"`
+	Semester  string        `json:"semester"`
+	NextStep  string        `json:"nextStep"`
+}
+
+func (n *NewLead) validate() error {
+	n.Company = strings.TrimSpace(n.Company)
+	n.NextStep = strings.TrimSpace(n.NextStep)
+	switch {
+	case n.CompanyID == "" && n.Company == "":
+		return invalid("company is required")
+	case n.CompanyID != "" && !uuidPattern.MatchString(n.CompanyID):
+		return invalid("companyId is not a company")
+	case n.ContactID != "" && !uuidPattern.MatchString(n.ContactID):
+		return invalid("contactId is not a contact")
+	case n.ContactID != "" && n.Contact != nil:
+		return invalid("give contactId or contact, not both")
+	case !slices.Contains(dealTypes, n.DealType):
+		return invalid("dealType must be one of %s", strings.Join(dealTypes, ", "))
+	case !semesterPattern.MatchString(n.Semester):
+		return invalid(`semester must look like "HT 2026" or "VT 2026"`)
+	}
+	if n.Contact != nil {
+		if err := n.Contact.validate(); err != nil {
+			return err
+		}
+	}
+	return tooLong(n.Company, n.NextStep)
+}
+
+// CompanyInput is a company's details, for a new company.
+type CompanyInput struct {
+	Name    string `json:"name"`
+	Website string `json:"website"`
+	Notes   string `json:"notes"`
+}
+
+func (c *CompanyInput) validate() error {
+	c.Name = strings.TrimSpace(c.Name)
+	c.Website = strings.TrimSpace(c.Website)
+	if c.Name == "" {
+		return invalid("a company needs a name")
+	}
+	return tooLong(c.Name, c.Website, c.Notes)
+}
+
+// textPatch reads a PATCH body whose fields are all text, mapping each allowed field to its column.
+func textPatch(body []byte, fields map[string]string) (map[string]any, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, invalid("body must be a JSON object")
+	}
+	if len(raw) == 0 {
+		return nil, invalid("nothing to update")
+	}
+	cols := map[string]any{}
+	for field, value := range raw {
+		column, ok := fields[field]
+		if !ok {
+			return nil, invalid("%s can't be changed", field)
+		}
+		// null would decode to "" and silently erase the field; clearing one takes "".
+		var s string
+		if string(value) == "null" || json.Unmarshal(value, &s) != nil {
+			return nil, invalid("%s must be text", field)
+		}
+		s = strings.TrimSpace(s)
+		if err := tooLong(s); err != nil {
+			return nil, err
+		}
+		cols[column] = s
+	}
+	return cols, nil
+}
+
+// ParseCompanyPatch reads a PATCH to a company: name, website or notes.
+func ParseCompanyPatch(body []byte) (map[string]any, error) {
+	cols, err := textPatch(body, map[string]string{"name": "name", "website": "website", "notes": "notes"})
+	if err == nil && cols["name"] == "" {
+		return nil, invalid("a company needs a name")
+	}
+	return cols, err
+}
+
+// ParseContactPatch reads a PATCH to a contact: companyId, name, email or role.
+func ParseContactPatch(body []byte) (map[string]any, error) {
+	cols, err := textPatch(body, map[string]string{"companyId": "company_id", "name": "name", "email": "email", "role": "role"})
+	if err != nil {
+		return nil, err
+	}
+	if id, ok := cols["company_id"].(string); ok && !uuidPattern.MatchString(id) {
+		return nil, invalid("companyId is not a company")
+	}
+	if email, ok := cols["email"].(string); ok && email != "" && !strings.Contains(email, "@") {
+		return nil, invalid("%q is not an email address", email)
+	}
+	return cols, nil
 }
 
 // ParsePatch turns a PATCH body into the columns to update. Only the fields the deal panel edits are
@@ -116,6 +228,16 @@ func ParsePatch(body []byte) (map[string]any, error) {
 				return nil, invalid("feeSEK must be a whole number from 0 to %d, or null", math.MaxInt32)
 			}
 			cols["fee_sek"] = n
+		case "contactId":
+			if isNull {
+				cols["contact_id"] = nil
+				continue
+			}
+			var id string
+			if json.Unmarshal(value, &id) != nil || !uuidPattern.MatchString(id) {
+				return nil, invalid("contactId must be a contact's id, or null")
+			}
+			cols["contact_id"] = id
 		case "invoiceStatus":
 			if isNull {
 				cols["invoice_status"] = nil

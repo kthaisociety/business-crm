@@ -14,6 +14,9 @@ Words as this project uses them.
   has one column per status.
 - **Semester**: HT (autumn) or VT (spring) plus the year, e.g. "HT 2026". The app shows one semester at a
   time.
+- **Company**: an organisation the team works with. It has deals and contacts, and its name is unique.
+- **Contact**: a person at a company, identified by their email. A deal's contact always works at the
+  deal's company, and email sync and Fathom will match senders and attendees to contacts.
 - **Owner** and **Support**: the business-team member who runs a deal, and the members who help.
 - **Next step**: the one thing to do next on a deal, with an optional due date.
 - **Touchpoint**: an entry on a deal's timeline: an email, a meeting or a note. Email sync and Fathom

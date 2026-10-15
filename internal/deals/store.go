@@ -24,9 +24,9 @@ func NewStore(db *gorm.DB) *Store {
 	return &Store{db: db}
 }
 
-// withEverything loads a deal's owner, support and timeline (oldest first) along with it.
+// withEverything loads a deal's company, contact, owner, support and timeline (oldest first) along with it.
 func withEverything(db *gorm.DB) *gorm.DB {
-	return db.Preload("Owner").Preload("Support").
+	return db.Preload("Company").Preload("Contact").Preload("Owner").Preload("Support").
 		Preload("Activities", func(db *gorm.DB) *gorm.DB { return db.Order("occurred_at") })
 }
 
@@ -63,7 +63,8 @@ func get(db *gorm.DB, id string) (View, error) {
 	return viewOf(d), nil
 }
 
-// Create adds a lead owned by whoever adds it, with an "Added as a lead" entry on its timeline.
+// Create adds a lead owned by whoever adds it, with an "Added as a lead" entry on its timeline. A new
+// company or contact given by name is added along with it.
 func (s *Store) Create(ctx context.Context, lead NewLead, by auth.User) (View, error) {
 	if err := lead.validate(); err != nil {
 		return View{}, err
@@ -78,20 +79,44 @@ func (s *Store) Create(ctx context.Context, lead NewLead, by auth.User) (View, e
 		if err != nil {
 			return err
 		}
-		d := Deal{
-			Company:      lead.Company,
-			DealType:     lead.DealType,
-			EventType:    eventType,
-			Audience:     "Unclear",
-			Semester:     lead.Semester,
-			Status:       "lead",
-			OwnerID:      &owner.ID,
-			ContactName:  lead.ContactName,
-			ContactEmail: lead.ContactEmail,
-			ContactRole:  lead.ContactRole,
-			NextStep:     lead.NextStep,
+		var company Company
+		if lead.CompanyID != "" {
+			company, err = companyByID(tx, lead.CompanyID)
+		} else {
+			company, err = companyNamed(tx, lead.Company)
 		}
-		if err := tx.Omit(clause.Associations).Create(&d).Error; err != nil {
+		if err != nil {
+			return err
+		}
+		var contactID *string
+		switch {
+		case lead.ContactID != "":
+			c, err := contactAt(tx, lead.ContactID, company)
+			if err != nil {
+				return err
+			}
+			contactID = &c.ID
+		case lead.Contact != nil:
+			c, err := createContact(tx, company.ID, *lead.Contact)
+			if err != nil {
+				return err
+			}
+			contactID = &c.ID
+		}
+		d := Deal{
+			CompanyID: company.ID,
+			ContactID: contactID,
+			DealType:  lead.DealType,
+			EventType: eventType,
+			Audience:  "Unclear",
+			Semester:  lead.Semester,
+			Status:    "lead",
+			OwnerID:   &owner.ID,
+			NextStep:  lead.NextStep,
+		}
+		if err := tx.Omit(clause.Associations).Create(&d).Error; isForeignKeyViolation(err) {
+			return invalid("that contact isn't at %s", company.Name) // moved there after the check above
+		} else if err != nil {
 			return err
 		}
 		if err := tx.Create(&Activity{
@@ -118,8 +143,22 @@ func (s *Store) Update(ctx context.Context, id string, cols map[string]any) (Vie
 	}
 	var view View
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if contactID, ok := cols["contact_id"].(string); ok {
+			var d Deal
+			if err := tx.Preload("Company").Where("id = ?", id).Take(&d).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrNotFound
+			} else if err != nil {
+				return err
+			}
+			if _, err := contactAt(tx, contactID, *d.Company); err != nil {
+				return err
+			}
+		}
 		cols["updated_at"] = time.Now()
 		res := tx.Model(&Deal{}).Where("id = ?", id).Updates(cols)
+		if isForeignKeyViolation(res.Error) {
+			return invalid("that contact isn't at the deal's company")
+		}
 		if res.Error != nil {
 			return res.Error
 		}
@@ -168,6 +207,19 @@ func (s *Store) AddNote(ctx context.Context, dealID, text string, by auth.User) 
 		return nil
 	})
 	return view, err
+}
+
+// contactAt finds a contact who works at the company: a deal's contact must.
+func contactAt(tx *gorm.DB, id string, company Company) (Contact, error) {
+	var c Contact
+	err := tx.Where("id = ?", id).Take(&c).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return c, invalid("contactId is not a contact")
+	}
+	if err == nil && c.CompanyID != company.ID {
+		return c, invalid("that contact isn't at %s", company.Name)
+	}
+	return c, err
 }
 
 // memberFor finds the signed-in user's member row, adding it the first time they change anything.

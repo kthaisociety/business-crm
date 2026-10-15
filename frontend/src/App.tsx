@@ -1,16 +1,35 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { Navigate, Route, Routes } from 'react-router'
-import { addNote, createDeal, fetchDeals, fetchMe, updateDeal, type DealPatch, type NewLeadInput, type User } from './api'
+import {
+  addNote,
+  createCompany,
+  createContact,
+  createDeal,
+  deleteCompany,
+  deleteContact,
+  fetchCompanies,
+  fetchContacts,
+  fetchDeals,
+  fetchMe,
+  updateCompany,
+  updateContact,
+  updateDeal,
+  type DealPatch,
+  type NewLeadInput,
+  type User,
+} from './api'
 import DealDetailDrawer from './components/drawer/DealDetailDrawer'
 import NewLeadDialog from './components/drawer/NewLeadDialog'
 import Header from './components/layout/Header'
 import Sidebar, { MobileNav } from './components/layout/Sidebar'
-import CompaniesPage from './components/pages/CompaniesPage'
-import ContactsPage from './components/pages/ContactsPage'
+import CompaniesPage, { type CompanyActions } from './components/pages/CompaniesPage'
+import ContactsPage, { type ContactActions } from './components/pages/ContactsPage'
 import ReportsPage from './components/pages/ReportsPage'
 import PipelineView from './components/PipelineView'
-import { compareSemesters, currentSemester, isConfirmed, isOpen, isUnpaid, type Deal } from './data/deals'
+import { compareSemesters, currentSemester, isConfirmed, isOpen, isUnpaid, type Company, type Contact, type Deal } from './data/deals'
+import { messageOf } from './format'
+import { LocalEdits } from './dealSync'
 import { useMinuteTick } from './hooks'
 
 function matches(deal: Deal, query: string): boolean {
@@ -29,15 +48,22 @@ function matches(deal: Deal, query: string): boolean {
 }
 
 const sumFees = (deals: Deal[]) => deals.reduce((sum, deal) => sum + (deal.feeSEK ?? 0), 0)
-const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err))
+
+type Data = { deals: Deal[]; companies: Company[]; contacts: Contact[] }
+
+const fetchAll = async (signal?: AbortSignal): Promise<Data> => {
+  const [deals, companies, contacts] = await Promise.all([fetchDeals(signal), fetchCompanies(signal), fetchContacts(signal)])
+  return { deals, companies, contacts }
+}
 
 export default function App() {
   useMinuteTick()
   const [user, setUser] = useState<User | null>(null)
   const [userError, setUserError] = useState<string | null>(null)
-  const [deals, setDeals] = useState<Deal[] | null>(null)
+  const [data, setData] = useState<Data | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [saveError, setSaveError] = useState<string | null>(null)
+  // A save or refresh that failed, shown above the board; a failed refresh can be retried on its own.
+  const [notice, setNotice] = useState<{ message: string; retry?: () => void } | null>(null)
   const [semester, setSemester] = useState(() => currentSemester())
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -54,9 +80,30 @@ export default function App() {
     return () => controller.abort()
   }, [])
 
-  const loadDeals = useCallback((signal?: AbortSignal) => {
-    fetchDeals(signal)
-      .then(setDeals)
+  // The server's latest version of each deal: a field whose save fails goes back to it.
+  const serverDeals = useRef(new Map<string, Deal>())
+  const remember = (deals: Deal[]) => {
+    for (const deal of deals) serverDeals.current.set(deal.id, deal)
+  }
+  // Local edits, field by field, so server answers never undo a newer edit (dealSync.ts).
+  const edits = useRef(new LocalEdits())
+  // Requests for deals, numbered as they go out, and per deal the newest one whose answer was applied, so
+  // an answer that was overtaken by a newer one can't bring back older shared details.
+  const requests = useRef({ count: 0, applied: new Map<string, number>() })
+  const applied = (deals: Deal[], request: number) => {
+    for (const deal of deals) {
+      requests.current.applied.set(deal.id, Math.max(request, requests.current.applied.get(deal.id) ?? 0))
+    }
+  }
+
+  const load = useCallback((signal?: AbortSignal) => {
+    const request = ++requests.current.count
+    fetchAll(signal)
+      .then((fresh) => {
+        remember(fresh.deals)
+        applied(fresh.deals, request)
+        setData(fresh)
+      })
       .catch((err: unknown) => {
         if (signal?.aborted) return
         setLoadError(`Couldn't load deals: ${messageOf(err)}`)
@@ -65,60 +112,101 @@ export default function App() {
 
   useEffect(() => {
     const controller = new AbortController()
-    loadDeals(controller.signal)
+    load(controller.signal)
     return () => controller.abort()
-  }, [loadDeals])
+  }, [load])
 
-  const all = deals ?? []
+  // Saves to one deal go out one at a time, in the order they were made, so the server ends up with the
+  // last edit.
+  const saveQueue = useRef(new Map<string, Promise<void>>())
+  const reloads = useRef(0)
+
+  // After a change that shows in more than one place (a company's name is on its deals, a new lead may
+  // add a company and contact), everything reloads. Only the latest reload applies, and in each deal it
+  // keeps the fields edited since it started or still saving. If it fails, the notice offers to retry it.
+  const reload = (): Promise<void> => {
+    const ticket = ++reloads.current
+    const takenAt = edits.current.now()
+    const request = ++requests.current.count
+    return fetchAll()
+      .then((fresh) => {
+        if (ticket !== reloads.current) return
+        remember(fresh.deals)
+        applied(fresh.deals, request)
+        setData((current) => {
+          const local = new Map(current?.deals.map((d) => [d.id, d]))
+          return { ...fresh, deals: fresh.deals.map((deal) => edits.current.merge(deal, local.get(deal.id), takenAt)) }
+        })
+      })
+      .catch((err: unknown) => setNotice({ message: `Couldn't refresh: ${messageOf(err)}`, retry: () => void reload() }))
+  }
+
+  const all = data?.deals ?? []
+  const companies = data?.companies ?? []
+  const contacts = data?.contacts ?? []
   // The current semester is always offered, even before it has deals.
   const semesters = [...new Set([currentSemester(), ...all.map((deal) => deal.semester)])].sort(compareSemesters)
 
   const replaceDeal = (id: string, change: (deal: Deal) => Deal) =>
-    setDeals((list) => list && list.map((deal) => (deal.id === id ? change(deal) : deal)))
+    setData((d) => d && { ...d, deals: d.deals.map((deal) => (deal.id === id ? change(deal) : deal)) })
 
-  // Saves to one deal go out one at a time, in the order they were made, so the server ends up with the
-  // last edit. `confirmed` holds each deal as the server last confirmed it while its saves are pending.
-  const saveQueue = useRef(new Map<string, Promise<void>>())
-  const confirmed = useRef(new Map<string, Deal>())
-
-  // Edits show at once and save in the background. If a save fails, each field it changed goes back to
-  // the last confirmed value, unless a newer edit has changed that field since; the error shows above the
-  // board.
+  // Edits show at once and save in the background. A save's answer updates the deal, except fields edited
+  // since. If a save fails, each field it changed goes back to the server's value, unless a newer edit has
+  // changed that field since; the error shows above the board.
   const saveDeal = (id: string, patch: DealPatch) => {
     const before = all.find((deal) => deal.id === id)
     if (!before) return
-    if (!confirmed.current.has(id)) confirmed.current.set(id, before)
-    replaceDeal(id, (deal) => ({ ...deal, ...patch }))
-    setSaveError(null)
+    const { contactId, ...fields } = patch
+    const local: Partial<Deal> = { ...fields }
+    if (contactId !== undefined) local.contact = contacts.find((c) => c.id === contactId) ?? null
+    // The fields this edit sets locally (a contactId shows as the contact itself). They count as saving
+    // from now, while queued too, so no refresh replaces them before the save is through.
+    const keys = Object.keys(local) as (keyof Deal)[]
+    const edit = edits.current.edit(id, keys)
+    edits.current.startSaving(id, keys)
+    replaceDeal(id, (deal) => ({ ...deal, ...local }))
+    setNotice(null)
 
-    const keys = Object.keys(patch) as (keyof DealPatch)[]
     const send = async () => {
+      const takenAt = edits.current.now()
+      const request = ++requests.current.count
       try {
-        confirmed.current.set(id, await updateDeal(id, patch))
+        const saved = await updateDeal(id, patch)
+        edits.current.doneSaving(id, keys)
+        // Overtaken by a newer answer (a refresh after someone renamed the company, say): only the fields
+        // this save set come from it.
+        const overtaken = (requests.current.applied.get(id) ?? 0) > request
+        if (!overtaken) {
+          serverDeals.current.set(id, saved)
+          applied([saved], request)
+        }
+        replaceDeal(id, (deal) => {
+          const answer = overtaken ? { ...deal, ...Object.fromEntries(keys.map((key) => [key, saved[key]])) } : saved
+          return edits.current.merge(answer, deal, takenAt)
+        })
       } catch (err) {
-        const last = confirmed.current.get(id)!
+        edits.current.doneSaving(id, keys)
+        const last = serverDeals.current.get(id) ?? before
         replaceDeal(id, (deal) => {
           const reverted = { ...deal }
-          for (const key of keys) if (deal[key] === patch[key]) Object.assign(reverted, { [key]: last[key] })
+          for (const key of keys) if (edits.current.isLatest(id, key, edit)) Object.assign(reverted, { [key]: last[key] })
           return reverted
         })
-        setSaveError(`Couldn't save ${before.company}: ${messageOf(err)}`)
+        setNotice({ message: `Couldn't save ${before.company}: ${messageOf(err)}` })
       }
     }
     const queued = (saveQueue.current.get(id) ?? Promise.resolve()).then(send)
     saveQueue.current.set(id, queued)
     void queued.then(() => {
       // The last save in line clears the deal's queue.
-      if (saveQueue.current.get(id) === queued) {
-        saveQueue.current.delete(id)
-        confirmed.current.delete(id)
-      }
+      if (saveQueue.current.get(id) === queued) saveQueue.current.delete(id)
     })
   }
 
   // Resolves once the note is saved; the drawer keeps the text if it rejects.
   const saveNote = async (id: string, text: string) => {
     const note = await addNote(id, text)
+    edits.current.edit(id, ['activities'])
     replaceDeal(id, (deal) => ({ ...deal, activities: [...deal.activities, note] }))
   }
 
@@ -127,9 +215,41 @@ export default function App() {
   const addLead = async (lead: Omit<NewLeadInput, 'semester'>) => {
     if (!user) return
     const deal = await createDeal({ ...lead, semester })
-    setDeals((list) => [...(list ?? []), deal])
+    remember([deal])
+    setData((d) => d && { ...d, deals: [...d.deals, deal] })
     setAddingLead(false)
     setSelectedId(deal.id)
+    void reload()
+  }
+
+  // Each resolves once saved and the app has reloaded; a rejection carries the server's reason to the form.
+  const companyActions: CompanyActions = {
+    create: async (input) => {
+      await createCompany(input)
+      await reload()
+    },
+    update: async (id, input) => {
+      await updateCompany(id, input)
+      await reload()
+    },
+    remove: async (id) => {
+      await deleteCompany(id)
+      await reload()
+    },
+  }
+  const contactActions: ContactActions = {
+    create: async (fields) => {
+      await createContact(fields)
+      await reload()
+    },
+    update: async (id, fields) => {
+      await updateContact(id, fields)
+      await reload()
+    },
+    remove: async (id) => {
+      await deleteContact(id)
+      await reload()
+    },
   }
 
   // Opens a deal from any page, switching to its semester so the board behind shows it.
@@ -154,19 +274,34 @@ export default function App() {
         confirmedSEK={sumFees(inSemester.filter(isConfirmed))}
         unpaidSEK={sumFees(inSemester.filter(isUnpaid))}
         // Adding waits for the deal list, so a late first load can't replace a lead added meanwhile.
-        canAddLead={user !== null && deals !== null}
+        canAddLead={user !== null && data !== null}
         onNewLead={() => setAddingLead(true)}
       />
       <MobileNav />
       <div className="flex min-h-0 flex-1">
         <Sidebar user={user} userError={userError} />
         <main className="flex min-w-0 flex-1 flex-col">
-          {saveError && (
+          {notice && (
             <p role="alert" className="mx-6 mt-4 flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-              {saveError}
-              <button type="button" aria-label="Dismiss" onClick={() => setSaveError(null)} className="text-red-500 hover:text-red-800">
-                <X size={14} aria-hidden />
-              </button>
+              {notice.message}
+              <span className="flex items-center gap-3">
+                {notice.retry && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const retry = notice.retry!
+                      setNotice(null)
+                      retry()
+                    }}
+                    className="font-semibold underline"
+                  >
+                    Retry
+                  </button>
+                )}
+                <button type="button" aria-label="Dismiss" onClick={() => setNotice(null)} className="text-red-500 hover:text-red-800">
+                  <X size={14} aria-hidden />
+                </button>
+              </span>
             </p>
           )}
           {loadError ? (
@@ -176,14 +311,14 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   setLoadError(null)
-                  loadDeals()
+                  load()
                 }}
                 className="ml-3 font-semibold underline"
               >
                 Retry
               </button>
             </div>
-          ) : deals === null ? (
+          ) : data === null ? (
             <p className="m-6 text-sm text-gray-500">Loading deals…</p>
           ) : (
             <Routes>
@@ -197,8 +332,8 @@ export default function App() {
                   />
                 }
               />
-              <Route path="companies" element={<CompaniesPage deals={all} query={query} onSelect={openDeal} />} />
-              <Route path="contacts" element={<ContactsPage deals={all} query={query} onSelect={openDeal} />} />
+              <Route path="companies" element={<CompaniesPage companies={companies} contacts={contacts} deals={all} query={query} onSelect={openDeal} actions={companyActions} contactActions={contactActions} />} />
+              <Route path="contacts" element={<ContactsPage companies={companies} contacts={contacts} deals={all} query={query} onSelect={openDeal} actions={contactActions} />} />
               <Route path="reports" element={<ReportsPage deals={all} semester={semester} onSelect={openDeal} />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
@@ -214,12 +349,13 @@ export default function App() {
             .filter((deal) => deal.company === selected.company && deal.id !== selected.id)
             .sort((a, b) => compareSemesters(a.semester, b.semester))}
           onClose={() => setSelectedId(null)}
+          companyContacts={contacts.filter((c) => c.companyId === selected.companyId)}
           onChange={(patch) => saveDeal(selected.id, patch)}
           onAddNote={(text) => saveNote(selected.id, text)}
           onSelect={openDeal}
         />
       )}
-      {addingLead && user && <NewLeadDialog semester={semester} onCreate={addLead} onClose={() => setAddingLead(false)} />}
+      {addingLead && user && <NewLeadDialog semester={semester} companies={companies} contacts={contacts} onCreate={addLead} onClose={() => setAddingLead(false)} />}
     </div>
   )
 }

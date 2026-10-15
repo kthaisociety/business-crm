@@ -42,7 +42,10 @@ export const INVOICE_STATUSES: { id: InvoiceStatus; label: string }[] = [
 
 export type Person = { id: string; name: string; email: string }
 
-export type Contact = { name: string; email: string; role: string }
+export type Company = { id: string; name: string; website: string; notes: string }
+
+// A person at a company. A deal's contact always works at the deal's company.
+export type Contact = { id: string; companyId: string; name: string; email: string; role: string }
 
 export type Activity = {
   id: string
@@ -57,7 +60,8 @@ export type Activity = {
 
 export type Deal = {
   id: string
-  company: string
+  companyId: string
+  company: string // the company's name
   dealType: DealType
   eventType: EventType
   audience: Audience

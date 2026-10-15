@@ -230,7 +230,7 @@ test('the list view shows the deal log as a table', async () => {
 async function addLead(fields: Record<string, string>) {
   await screen.findByText('Signed in as dev@kthais.com')
   fireEvent.click(screen.getByRole('button', { name: 'New Lead' }))
-  const form = screen.getByRole('dialog', { name: 'New lead' })
+  const form = screen.getByRole('dialog', { name: /^New lead/ })
   for (const [label, value] of Object.entries(fields)) {
     fireEvent.change(within(form).getByLabelText(label), { target: { value } })
   }
@@ -248,15 +248,7 @@ test('a new lead is saved to Lead in the selected semester, owned by the signed-
   expect(api.requests).toContainEqual({
     method: 'POST',
     path: '/api/deals',
-    body: {
-      company: 'Nordljus AB',
-      dealType: 'Event',
-      semester: thisSemester,
-      contactName: '',
-      contactEmail: '',
-      contactRole: '',
-      nextStep: 'Send intro email',
-    },
+    body: { company: 'Nordljus AB', dealType: 'Event', semester: thisSemester, nextStep: 'Send intro email' },
   })
 })
 
@@ -266,7 +258,7 @@ test('a lead that fails to save keeps the form open, with the reason', async () 
 
   const form = await addLead({ Company: 'Nordljus AB' })
 
-  expect(await within(form).findByRole('alert')).toHaveTextContent("Couldn't add the lead: something went wrong (500)")
+  expect(await within(form).findByRole('alert')).toHaveTextContent('something went wrong (500)')
   expect(within(form).getByLabelText('Company')).toHaveValue('Nordljus AB')
 })
 
@@ -516,10 +508,149 @@ test('a new lead keeps the contact’s role, and Contacts shows it', async () =>
 
   await addLead({ Company: 'Nordljus AB', 'Contact name': 'Kim Ek', 'Contact email': 'kim@example.com', 'Contact role': 'Head of Talent' })
 
-  expect(await screen.findByRole('dialog', { name: 'Nordljus AB' })).toHaveTextContent('Kim Ek · Head of Talent')
+  const drawer = await screen.findByRole('dialog', { name: 'Nordljus AB' })
+  expect(within(drawer).getByLabelText('Contact')).toHaveDisplayValue('Kim Ek')
+  expect(drawer).toHaveTextContent('Head of Talent · kim@example.com')
   fireEvent.keyDown(document, { key: 'Escape' })
   goTo('Contacts')
-  expect(screen.getByRole('button', { name: 'Kim Ek' }).closest('tr')).toHaveTextContent('Head of Talent')
+  expect((await screen.findByRole('button', { name: 'Kim Ek' })).closest('tr')).toHaveTextContent('Head of Talent')
+})
+
+test('a new lead at an existing company can pick one of its contacts', async () => {
+  await renderApp()
+  await screen.findByText('Signed in as dev@kthais.com')
+  fireEvent.click(screen.getByRole('button', { name: 'New Lead' }))
+  const form = screen.getByRole('dialog', { name: /^New lead/ })
+
+  fireEvent.change(within(form).getByLabelText('Company'), { target: { value: 'granit consulting' } })
+  expect(form).toHaveTextContent('Existing company, 1 contact')
+  fireEvent.change(within(form).getByLabelText('Contact'), { target: { value: 'p-lina-dahl-example-com' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Add lead' }))
+
+  const drawer = await screen.findByRole('dialog', { name: 'Granit Consulting' })
+  expect(within(drawer).getByLabelText('Contact')).toHaveDisplayValue('Lina Dahl')
+  expect(api.requests).toContainEqual({
+    method: 'POST',
+    path: '/api/deals',
+    body: { companyId: 'c-granit-consulting', contactId: 'p-lina-dahl-example-com', dealType: 'Event', semester: thisSemester, nextStep: '' },
+  })
+  expect(api.companies.filter((c) => c.name === 'Granit Consulting')).toHaveLength(1)
+})
+
+test('the deal panel changes the deal’s contact to another at the company', async () => {
+  api.contacts.push({ id: 'p-sam', companyId: 'c-granit-consulting', name: 'Sam Berg', email: 'sam@example.com', role: 'CFO' })
+  await renderApp()
+  const drawer = open('Granit Consulting')
+
+  fireEvent.change(within(drawer).getByLabelText('Contact'), { target: { value: 'p-sam' } })
+
+  expect(drawer).toHaveTextContent('CFO · sam@example.com')
+  await waitFor(() => expect(patches()).toEqual([{ method: 'PATCH', path: '/api/deals/granit', body: { contactId: 'p-sam' } }]))
+})
+
+test('a contact change that fails to save goes back', async () => {
+  api.contacts.push({ id: 'p-sam', companyId: 'c-granit-consulting', name: 'Sam Berg', email: 'sam@example.com', role: 'CFO' })
+  api.fail('PATCH', /^\/api\/deals\//, 500)
+  await renderApp()
+  const drawer = open('Granit Consulting')
+
+  fireEvent.change(within(drawer).getByLabelText('Contact'), { target: { value: 'p-sam' } })
+
+  expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't save Granit Consulting")
+  expect(within(drawer).getByLabelText('Contact')).toHaveDisplayValue('Lina Dahl')
+})
+
+const dialogNamed = (name: string | RegExp) => screen.findByRole('dialog', { name })
+
+test('Companies adds, renames and deletes companies', async () => {
+  renderAt('/companies')
+  await screen.findByRole('button', { name: 'Granit Consulting' })
+
+  fireEvent.click(screen.getByRole('button', { name: 'New company' }))
+  let form = await dialogNamed('New company')
+  fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'Aurora AB' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Add company' }))
+  const aurora = await screen.findByRole('button', { name: 'Aurora AB' })
+  expect(aurora.closest('tr')).toHaveTextContent('No deals yet')
+
+  // A company with deals can be renamed, and its deals follow; it can't be deleted.
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Granit Consulting' }))
+  form = await dialogNamed('Edit Granit Consulting')
+  expect(within(form).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+  fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'Granit AB' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+  expect(await screen.findByRole('button', { name: 'Granit AB' })).toBeInTheDocument()
+  expect(api.deals.find((d) => d.id === 'granit')?.company).toBe('Granit AB')
+
+  // A company without deals can be deleted, after asking again.
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Aurora AB' }))
+  form = await dialogNamed('Edit Aurora AB')
+  fireEvent.click(within(form).getByRole('button', { name: 'Delete' }))
+  fireEvent.click(within(form).getByRole('button', { name: 'Delete company' }))
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Aurora AB' })).not.toBeInTheDocument())
+})
+
+test('a duplicate company name shows the reason and keeps the form', async () => {
+  renderAt('/companies')
+  await screen.findByRole('button', { name: 'Granit Consulting' })
+
+  fireEvent.click(screen.getByRole('button', { name: 'New company' }))
+  const form = await dialogNamed('New company')
+  fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'granit consulting' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Add company' }))
+
+  expect(await within(form).findByRole('alert')).toHaveTextContent('there is already a company called granit consulting (409)')
+  expect(within(form).getByLabelText('Name')).toHaveValue('granit consulting')
+})
+
+test('a contact can be added from their company', async () => {
+  renderAt('/companies')
+  fireEvent.click(await screen.findByRole('button', { name: 'Vinga Voice' }))
+  expect(screen.getByRole('list', { name: 'Contacts at Vinga Voice' })).toHaveTextContent('Adam Roos')
+
+  fireEvent.click(screen.getByRole('button', { name: 'Add contact' }))
+  const form = await dialogNamed('New contact')
+  expect(within(form).getByLabelText('Company')).toHaveDisplayValue('Vinga Voice')
+  fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'Mia Lind' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Add contact' }))
+
+  await waitFor(() => expect(screen.getByRole('list', { name: 'Contacts at Vinga Voice' })).toHaveTextContent('Mia Lind'))
+})
+
+test('Contacts edits a contact everywhere, and deletes one without deals', async () => {
+  api.contacts.push({ id: 'p-sam', companyId: 'c-granit-consulting', name: 'Sam Berg', email: 'sam@example.com', role: 'CFO' })
+  renderAt('/contacts')
+  await screen.findByRole('button', { name: 'Lina Dahl' })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Lina Dahl' }))
+  let form = await dialogNamed('Edit Lina Dahl')
+  expect(within(form).getByLabelText('Company')).toBeDisabled()
+  expect(within(form).queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument()
+  fireEvent.change(within(form).getByLabelText('Role'), { target: { value: 'Head of Talent' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Lina Dahl' }).closest('tr')).toHaveTextContent('Head of Talent'))
+
+  fireEvent.click(screen.getByRole('button', { name: 'Lina Dahl' }))
+  expect(screen.getByRole('dialog', { name: 'Granit Consulting' })).toHaveTextContent('Head of Talent')
+  fireEvent.keyDown(document, { key: 'Escape' })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Sam Berg' }))
+  form = await dialogNamed('Edit Sam Berg')
+  fireEvent.click(within(form).getByRole('button', { name: 'Delete' }))
+  fireEvent.click(within(form).getByRole('button', { name: 'Delete contact' }))
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Sam Berg' })).not.toBeInTheDocument())
+})
+
+test('a contact email already in use shows the reason', async () => {
+  renderAt('/contacts')
+  await screen.findByRole('button', { name: 'Lina Dahl' })
+
+  fireEvent.click(screen.getByRole('button', { name: 'New contact' }))
+  const form = await dialogNamed('New contact')
+  fireEvent.change(within(form).getByLabelText('Email'), { target: { value: 'LINA.DAHL@example.com' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Add contact' }))
+
+  expect(await within(form).findByRole('alert')).toHaveTextContent('LINA.DAHL@example.com is already a contact (409)')
 })
 
 test('saves to a deal go out in order, and a failed one keeps a newer edit', async () => {
@@ -590,4 +721,84 @@ test('the New Lead form stays open until its lead is saved', async () => {
   await act(() => save.release())
   expect(await screen.findByRole('dialog', { name: 'Nordljus AB' })).toBeInTheDocument()
   expect(screen.queryByRole('dialog', { name: 'New lead' })).not.toBeInTheDocument()
+})
+
+test('a refresh that started before an edit doesn’t undo it', async () => {
+  await renderApp()
+  const refresh = api.hold('GET', /^\/api\/deals$/)
+  await addLead({ Company: 'Nordljus AB' })
+  const drawer = await screen.findByRole('dialog', { name: 'Nordljus AB' })
+
+  fireEvent.change(within(drawer).getByLabelText('Status'), { target: { value: 'discussing' } })
+  await waitFor(() => expect(patches()).toHaveLength(1))
+  await act(() => refresh.release())
+
+  expect(within(drawer).getByLabelText('Status')).toHaveValue('discussing')
+  expect(within(column('Discussing')).getByText('Nordljus AB')).toBeInTheDocument()
+})
+
+test('a form can’t be closed while it deletes', async () => {
+  const deleting = api.hold('DELETE', /^\/api\/companies\//)
+  renderAt('/companies')
+  await screen.findByRole('button', { name: 'Granit Consulting' })
+  fireEvent.click(screen.getByRole('button', { name: 'New company' }))
+  let form = await dialogNamed('New company')
+  fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'Aurora AB' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Add company' }))
+  await screen.findByRole('button', { name: 'Aurora AB' })
+
+  fireEvent.click(screen.getByRole('button', { name: 'Edit Aurora AB' }))
+  form = await dialogNamed('Edit Aurora AB')
+  fireEvent.click(within(form).getByRole('button', { name: 'Delete' }))
+  fireEvent.click(within(form).getByRole('button', { name: 'Delete company' }))
+  fireEvent.keyDown(document, { key: 'Escape' })
+  expect(form).toBeInTheDocument()
+  expect(within(form).getByRole('button', { name: 'Deleting…' })).toBeDisabled()
+
+  await act(() => deleting.release())
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  expect(screen.queryByRole('button', { name: 'Aurora AB' })).not.toBeInTheDocument()
+})
+
+test('a contact edited elsewhere shows on a deal that’s still saving', async () => {
+  const saving = api.hold('PATCH', /^\/api\/deals\/granit$/)
+  await renderApp()
+  open('Granit Consulting')
+  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'finished' } })
+  fireEvent.keyDown(document, { key: 'Escape' })
+
+  goTo('Contacts')
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit Lina Dahl' }))
+  const form = await dialogNamed('Edit Lina Dahl')
+  fireEvent.change(within(form).getByLabelText('Email'), { target: { value: 'lina@granit.example.com' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  await act(() => saving.release())
+
+  goTo('Pipeline')
+  const drawer = open('Granit Consulting')
+  expect(within(drawer).getByLabelText('Status')).toHaveValue('finished')
+  expect(within(drawer).getByRole('link', { name: 'Send Email' })).toHaveAttribute(
+    'href',
+    expect.stringMatching(/^mailto:lina@granit\.example\.com\?/),
+  )
+})
+
+test('a refresh that fails after a save can be retried on its own', async () => {
+  renderAt('/companies')
+  await screen.findByRole('button', { name: 'Granit Consulting' })
+  api.failOnce('GET', /^\/api\/companies$/)
+
+  fireEvent.click(screen.getByRole('button', { name: 'New company' }))
+  const form = await dialogNamed('New company')
+  fireEvent.change(within(form).getByLabelText('Name'), { target: { value: 'Aurora AB' } })
+  fireEvent.click(within(form).getByRole('button', { name: 'Add company' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't refresh")
+  expect(screen.queryByRole('button', { name: 'Aurora AB' })).not.toBeInTheDocument()
+  const posts = api.requests.filter((r) => r.method === 'POST').length
+
+  fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+  expect(await screen.findByRole('button', { name: 'Aurora AB' })).toBeInTheDocument()
+  expect(api.requests.filter((r) => r.method === 'POST')).toHaveLength(posts) // the company isn't added twice
 })
