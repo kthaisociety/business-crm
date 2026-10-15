@@ -21,7 +21,9 @@ export type FakeApi = {
   fail: (method: string, path: RegExp, status?: number, error?: string) => void
   failOnce: (method: string, path: RegExp, status?: number, error?: string) => void
   // Hold back the answers to matching requests until release() is called, to test what happens meanwhile.
-  hold: (method: string, path: RegExp) => { release: () => Promise<void> }
+  // A held request normally takes effect when it arrives; with `late` it takes effect only on release,
+  // like a write that commits after other requests have read.
+  hold: (method: string, path: RegExp, options?: { late?: boolean }) => { release: () => Promise<void> }
 }
 
 const json = (body: unknown, status = 200) =>
@@ -49,10 +51,10 @@ export function stubApi(options: { me?: () => Promise<Response>; role?: Role } =
     failOnce(method, path, status = 500, message = 'something went wrong') {
       api.failures.push({ method, path, status, error: message, once: true })
     },
-    hold(method, path) {
+    hold(method, path, { late = false } = {}) {
       let release: () => void = () => {}
       const gate = new Promise<void>((resolve) => (release = resolve))
-      holds.push({ method, path, gate })
+      holds.push({ method, path, gate, late })
       return {
         release: async () => {
           release()
@@ -61,7 +63,7 @@ export function stubApi(options: { me?: () => Promise<Response>; role?: Role } =
       }
     },
   }
-  const holds: { method: string; path: RegExp; gate: Promise<void> }[] = []
+  const holds: { method: string; path: RegExp; gate: Promise<void>; late: boolean }[] = []
   const sameText = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
   const emailTaken = (email: string, except?: string) =>
     email !== '' && api.contacts.some((c) => c.id !== except && sameText(c.email, email))
@@ -260,9 +262,10 @@ export function stubApi(options: { me?: () => Promise<Response>; role?: Role } =
       api.requests.push({ method, path: input, body })
       // A held request is answered as of when it arrived, like a slow server: the response waits, the
       // data it carries doesn't.
-      const response = await handle(method, input, body ?? {})
       const held = holds.find((h) => h.method === method && h.path.test(input))
-      if (held) await held.gate
+      if (held?.late) await held.gate
+      const response = await handle(method, input, body ?? {})
+      if (held && !held.late) await held.gate
       return response
     }),
   )

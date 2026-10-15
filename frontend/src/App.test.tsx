@@ -929,3 +929,41 @@ test('members don’t see Reports', async () => {
   expect(within(screen.getByRole('navigation', { name: 'Main' })).queryByRole('link', { name: 'Reports' })).not.toBeInTheDocument()
   expect(within(screen.getByRole('navigation', { name: 'Pages' })).queryByRole('link', { name: 'Reports' })).not.toBeInTheDocument()
 })
+
+test('a failed edit goes back to the last successful save, even one a refresh overtook', async () => {
+  const save = api.hold('PATCH', /^\/api\/deals\/lumen$/, { late: true })
+  await renderApp()
+  open('Lumen Health')
+  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'discussing' } })
+  fireEvent.keyDown(document, { key: 'Escape' })
+
+  // A refresh reads before the save commits, and is answered first.
+  await addLead({ Company: 'Nordljus AB' })
+  await screen.findByRole('dialog', { name: 'Nordljus AB' })
+  fireEvent.keyDown(document, { key: 'Escape' })
+  await act(() => save.release())
+  await waitFor(() => expect(api.deals.find((d) => d.id === 'lumen')?.status).toBe('discussing'))
+
+  api.failOnce('PATCH', /^\/api\/deals\/lumen$/)
+  open('Lumen Health')
+  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'signed' } })
+
+  expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't save Lumen Health")
+  expect(screen.getByLabelText('Status')).toHaveValue('discussing')
+})
+
+test('a note shows once when another answer brings it first', async () => {
+  const note = api.hold('POST', /\/notes$/)
+  await renderApp()
+  const drawer = open('Lumen Health')
+
+  fireEvent.change(within(drawer).getByLabelText('Quick note'), { target: { value: 'Called them' } })
+  fireEvent.click(within(drawer).getByRole('button', { name: 'Save Note' }))
+  await waitFor(() => expect(api.requests.some((r) => r.path.endsWith('/notes'))).toBe(true))
+  fireEvent.change(within(drawer).getByLabelText('Status'), { target: { value: 'discussing' } })
+  await waitFor(() => expect(within(drawer).getAllByText('Called them')).toHaveLength(1))
+  await act(() => note.release())
+
+  await waitFor(() => expect(within(drawer).getByLabelText('Quick note')).toHaveValue(''))
+  expect(within(drawer).getAllByText('Called them')).toHaveLength(1)
+})

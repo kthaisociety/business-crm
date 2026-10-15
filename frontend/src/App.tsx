@@ -200,14 +200,15 @@ export default function App() {
         // Overtaken by a newer answer (a refresh after someone renamed the company, say): only the fields
         // this save set come from it.
         const overtaken = (requests.current.applied.get(id) ?? 0) > request
-        if (!overtaken) {
+        const savedFields = Object.fromEntries(keys.map((key) => [key, saved[key]]))
+        if (overtaken) {
+          // The saved fields are still the server's latest: a later failed edit goes back to them.
+          serverDeals.current.set(id, { ...(serverDeals.current.get(id) ?? saved), ...savedFields })
+        } else {
           serverDeals.current.set(id, saved)
           applied([saved], request)
         }
-        replaceDeal(id, (deal) => {
-          const answer = overtaken ? { ...deal, ...Object.fromEntries(keys.map((key) => [key, saved[key]])) } : saved
-          return edits.current.merge(answer, deal, takenAt)
-        })
+        replaceDeal(id, (deal) => edits.current.merge(overtaken ? { ...deal, ...savedFields } : saved, deal, takenAt))
       } catch (err) {
         edits.current.doneSaving(id, keys)
         const last = serverDeals.current.get(id) ?? before
@@ -231,7 +232,10 @@ export default function App() {
   const saveNote = async (id: string, text: string) => {
     const note = await addNote(id, text)
     edits.current.edit(id, ['activities'])
-    replaceDeal(id, (deal) => ({ ...deal, activities: [...deal.activities, note] }))
+    // Another answer may have brought the note already; it shows once.
+    replaceDeal(id, (deal) =>
+      deal.activities.some((a) => a.id === note.id) ? deal : { ...deal, activities: [...deal.activities, note] },
+    )
   }
 
   // A new lead is owned by whoever adds it (the server records the signed-in user), so adding waits
