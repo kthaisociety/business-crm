@@ -131,6 +131,9 @@ func fail(c *gin.Context, err error) {
 	var clash *deals.ConflictError
 	var forbidden *deals.ForbiddenError
 	switch {
+	case errors.Is(err, deals.ErrNotOnTeam):
+		// Removed from the team while signed in: signed out now.
+		c.JSON(http.StatusUnauthorized, gin.H{"error": err.Error()})
 	case errors.As(err, &forbidden):
 		c.JSON(http.StatusForbidden, gin.H{"error": forbidden.Error()})
 	case errors.As(err, &invalid):

@@ -26,7 +26,7 @@ func newTeamRouter(t *testing.T, adminEmails ...string) *gin.Engine {
 func TestMeSaysWhoIAmOnTheTeam(t *testing.T) {
 	r := newTeamRouter(t, devUser.Email)
 
-	me := decode[map[string]string](t, get(r, "/api/me"))
+	me := decode[map[string]any](t, get(r, "/api/me"))
 
 	assert.Equal(t, devUser.Email, me["email"])
 	assert.Equal(t, "admin", me["role"])
@@ -65,6 +65,6 @@ func TestAdminsManageTheTeam(t *testing.T) {
 	send(r, http.MethodPatch, "/api/deals/"+deal.ID, `{"ownerId":null}`)
 	assert.Equal(t, http.StatusNoContent, send(r, http.MethodDelete, "/api/members/"+maja.ID, ``).Code)
 
-	me := decode[map[string]string](t, get(r, "/api/me"))
-	assert.Equal(t, http.StatusConflict, send(r, http.MethodPatch, "/api/members/"+me["memberId"], `{"role":"member"}`).Code)
+	me := decode[map[string]any](t, get(r, "/api/me"))
+	assert.Equal(t, http.StatusConflict, send(r, http.MethodPatch, "/api/members/"+me["memberId"].(string), `{"role":"member"}`).Code)
 }

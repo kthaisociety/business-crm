@@ -46,12 +46,58 @@ test('shows the signed-in user', async () => {
   expect(await screen.findByText('Signed in as dev@kthais.com')).toBeInTheDocument()
 })
 
-test('shows an error when no one is signed in', async () => {
+test('shows the sign-in page when no one is signed in', async () => {
   api = stubApi({ me: async () => new Response('', { status: 401 }) })
 
   renderAt()
 
-  expect(await screen.findByText('Loading the signed-in user failed (401)')).toBeInTheDocument()
+  expect(await screen.findByRole('link', { name: 'Sign in with Google' })).toHaveAttribute('href', '/auth/login')
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+})
+
+test('the sign-in page says why the last sign-in was refused', async () => {
+  api = stubApi({ me: async () => new Response('', { status: 401 }) })
+  window.history.replaceState(null, '', '/?sign-in=not-on-team')
+
+  renderAt()
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('You’re not on the business team yet. Ask an admin to add you')
+  window.history.replaceState(null, '', '/')
+})
+
+test('signing out shows the sign-in page', async () => {
+  api = stubApi({ signedIn: true })
+  await renderApp()
+
+  fireEvent.click(within(screen.getByRole('complementary')).getByRole('button', { name: 'Sign out' }))
+
+  expect(await screen.findByRole('link', { name: 'Sign in with Google' })).toBeInTheDocument()
+  expect(api.requests.some((r) => r.method === 'POST' && r.path === '/auth/logout')).toBe(true)
+})
+
+test('phones can sign out too', async () => {
+  api = stubApi({ signedIn: true })
+  await renderApp()
+
+  fireEvent.click(within(screen.getByRole('navigation', { name: 'Pages' })).getByRole('button', { name: 'Sign out' }))
+
+  expect(await screen.findByRole('link', { name: 'Sign in with Google' })).toBeInTheDocument()
+})
+
+test('the dev user has no sign-out', async () => {
+  await renderApp()
+
+  expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument()
+})
+
+test('a session that ends while the app is open shows the sign-in page', async () => {
+  await renderApp()
+  api.fail('PATCH', /^\/api\/deals\//, 401, 'sign-in required')
+  open('Lumen Health')
+
+  fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'discussing' } })
+
+  expect(await screen.findByRole('link', { name: 'Sign in with Google' })).toBeInTheDocument()
 })
 
 test('shows the current semester by status, with its totals', async () => {

@@ -38,7 +38,11 @@ type Body = Record<string, unknown>
 
 // `role` is the dev user's role on the team: admin unless a test says otherwise. With `firstSignIn`, the
 // dev user joins the team only when /api/me is first called, as the real server does.
-export function stubApi(options: { me?: () => Promise<Response>; role?: Role; firstSignIn?: boolean } = {}): FakeApi {
+// With `signedIn`, the dev user signed in for real and can sign out (docs/adr/0004); without it, they're
+// the dev user, always signed in.
+export function stubApi(
+  options: { me?: () => Promise<Response>; role?: Role; firstSignIn?: boolean; signedIn?: boolean } = {},
+): FakeApi {
   const role = options.role ?? 'admin'
   const team = structuredClone(fixtureMembers).map((m) => (m.id === devMember.id ? { ...m, role } : m))
   const api: FakeApi = {
@@ -79,15 +83,21 @@ export function stubApi(options: { me?: () => Promise<Response>; role?: Role; fi
     }
   }
 
+  let signedOut = false
   const handle = async (method: string, path: string, body: Body): Promise<Response> => {
     const failure = api.failures.find((f) => f.method === method && f.path.test(path))
     if (failure?.once) api.failures.splice(api.failures.indexOf(failure), 1)
     if (failure) return error(failure.status, failure.error)
 
+    if (method === 'POST' && path === '/auth/logout') {
+      signedOut = true
+      return new Response(null, { status: 204 })
+    }
+    if (signedOut) return error(401, 'sign-in required')
     if (method === 'GET' && path === '/api/me') {
       if (!api.members.some((m) => m.id === devMember.id)) api.members.push({ ...devMember, role })
       const me = api.members.find((m) => m.id === devMember.id)!
-      return options.me ? options.me() : json({ ...devUser, memberId: me.id, role: me.role })
+      return options.me ? options.me() : json({ ...devUser, memberId: me.id, role: me.role, canSignOut: !!options.signedIn })
     }
     if (method === 'GET' && path === '/api/members') return json(api.members)
     if (method === 'GET' && path === '/api/deals') return json(api.deals)

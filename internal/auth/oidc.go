@@ -1,0 +1,214 @@
+package auth
+
+import (
+	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/coreos/go-oidc/v3/oidc"
+	"golang.org/x/oauth2"
+)
+
+// OIDCConfig is the provider this app signs people in with (docs/adr/0004).
+type OIDCConfig struct {
+	Issuer       string
+	ClientID     string
+	ClientSecret string
+	// RedirectURL is this app's /auth/callback, exactly as registered with the provider.
+	RedirectURL string
+	// Domain is the email domain that may sign in, e.g. kthais.com.
+	Domain string
+	// Google says so: its ID tokens carry `hd`, the Workspace domain, which must be Domain too, and its
+	// sign-in page can be limited to Domain's accounts.
+	Google bool
+}
+
+// OIDC runs the authorization code flow with PKCE: Begin sends the browser to the provider, Finish takes
+// the code it comes back with and returns who signed in. Between the two, a short-lived signed cookie per
+// sign-in holds its state, nonce and PKCE verifier, so sign-ins in two tabs don't trip each other up.
+type OIDC struct {
+	cfg      OIDCConfig
+	oauth    oauth2.Config
+	verifier *oidc.IDTokenVerifier
+	key      []byte
+	cookie   cookieKind
+}
+
+// NewOIDC reads the provider's discovery document, so it needs the provider to be reachable.
+func NewOIDC(ctx context.Context, cfg OIDCConfig) (*OIDC, error) {
+	provider, err := oidc.NewProvider(ctx, cfg.Issuer)
+	if err != nil {
+		return nil, fmt.Errorf("oidc provider %s: %w", cfg.Issuer, err)
+	}
+	// The flow cookie's signing key, derived from the client secret so there's no other secret to set.
+	mac := hmac.New(sha256.New, []byte(cfg.ClientSecret))
+	mac.Write([]byte("business-crm sign-in flow"))
+	return &OIDC{
+		cfg: cfg,
+		oauth: oauth2.Config{
+			ClientID:     cfg.ClientID,
+			ClientSecret: cfg.ClientSecret,
+			Endpoint:     provider.Endpoint(),
+			RedirectURL:  cfg.RedirectURL,
+			Scopes:       []string{oidc.ScopeOpenID, "email", "profile"},
+		},
+		verifier: provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
+		key:      mac.Sum(nil),
+		cookie:   cookieKindFor(cfg.RedirectURL),
+	}, nil
+}
+
+// SignInError is why a sign-in was refused. Reason is safe to show; the wrapped error is for the log.
+type SignInError struct {
+	Reason string
+	Err    error
+}
+
+func (e *SignInError) Error() string { return e.Reason + ": " + e.Err.Error() }
+func (e *SignInError) Unwrap() error { return e.Err }
+
+const (
+	// The provider or this app failed, or the flow was tampered with or expired: try again.
+	ReasonFailed = "failed"
+	// The account isn't one of SIGN_IN_DOMAIN's, or its email isn't verified.
+	ReasonDomain = "domain"
+	// The account is fine, but not on the team.
+	ReasonNotOnTeam = "not-on-team"
+)
+
+type flow struct {
+	State    string `json:"s"`
+	Nonce    string `json:"n"`
+	Verifier string `json:"v"`
+	Expires  int64  `json:"e"`
+}
+
+const flowTTL = 10 * time.Minute
+
+// providerTimeout bounds Finish's calls to the provider (the token exchange, and its keys if they
+// changed), so a provider that stops answering fails the sign-in instead of holding it open.
+var providerTimeout = 15 * time.Second
+
+// flowCookieName is the cookie for the sign-in with this state: part of the state is enough to tell
+// sign-ins apart, and Finish still checks the whole of it.
+func flowCookieName(state string) string {
+	if len(state) > 16 {
+		state = state[:16]
+	}
+	return flowCookie + "_" + state
+}
+
+// Begin starts a sign-in: it sets the flow cookie and returns the provider's URL to send the browser to.
+func (o *OIDC) Begin(w http.ResponseWriter) string {
+	f := flow{State: randomString(), Nonce: randomString(), Verifier: oauth2.GenerateVerifier(), Expires: time.Now().Add(flowTTL).Unix()}
+	payload, _ := json.Marshal(f)
+	value := base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(o.sign(payload))
+	http.SetCookie(w, o.cookie.new(flowCookieName(f.State), value, flowTTL))
+
+	opts := []oauth2.AuthCodeOption{oidc.Nonce(f.Nonce), oauth2.S256ChallengeOption(f.Verifier)}
+	if o.cfg.Google {
+		// Google offers only this domain's accounts, and lets someone with several pick one.
+		opts = append(opts, oauth2.SetAuthURLParam("hd", o.cfg.Domain), oauth2.SetAuthURLParam("prompt", "select_account"))
+	}
+	return o.oauth.AuthCodeURL(f.State, opts...)
+}
+
+// Finish completes a sign-in from the provider's redirect back to this app, and clears the flow cookie.
+func (o *OIDC) Finish(w http.ResponseWriter, r *http.Request) (User, error) {
+	q := r.URL.Query()
+	name := flowCookieName(q.Get("state"))
+	http.SetCookie(w, o.cookie.clear(name))
+	f, err := o.readFlow(r, name)
+	if err != nil {
+		return User{}, &SignInError{ReasonFailed, err}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), providerTimeout)
+	defer cancel()
+	if e := q.Get("error"); e != "" {
+		return User{}, &SignInError{ReasonFailed, fmt.Errorf("provider: %s", e)}
+	}
+	if subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(f.State)) != 1 {
+		return User{}, &SignInError{ReasonFailed, errors.New("state doesn't match")}
+	}
+
+	token, err := o.oauth.Exchange(ctx, q.Get("code"), oauth2.VerifierOption(f.Verifier))
+	if err != nil {
+		return User{}, &SignInError{ReasonFailed, fmt.Errorf("exchanging the code: %w", err)}
+	}
+	raw, ok := token.Extra("id_token").(string)
+	if !ok {
+		return User{}, &SignInError{ReasonFailed, errors.New("no id_token in the token response")}
+	}
+	// Checks the signature, issuer, audience and expiry.
+	idToken, err := o.verifier.Verify(ctx, raw)
+	if err != nil {
+		return User{}, &SignInError{ReasonFailed, fmt.Errorf("verifying the id_token: %w", err)}
+	}
+	if subtle.ConstantTimeCompare([]byte(idToken.Nonce), []byte(f.Nonce)) != 1 {
+		return User{}, &SignInError{ReasonFailed, errors.New("nonce doesn't match")}
+	}
+	var claims struct {
+		Email         string `json:"email"`
+		EmailVerified bool   `json:"email_verified"`
+		Name          string `json:"name"`
+		HostedDomain  string `json:"hd"`
+	}
+	if err := idToken.Claims(&claims); err != nil {
+		return User{}, &SignInError{ReasonFailed, fmt.Errorf("reading claims: %w", err)}
+	}
+	email := strings.ToLower(claims.Email)
+	domain := strings.ToLower(o.cfg.Domain)
+	switch {
+	case !claims.EmailVerified:
+		return User{}, &SignInError{ReasonDomain, fmt.Errorf("%s isn't verified", email)}
+	case !strings.HasSuffix(email, "@"+domain):
+		return User{}, &SignInError{ReasonDomain, fmt.Errorf("%s isn't in %s", email, domain)}
+	case o.cfg.Google && !strings.EqualFold(claims.HostedDomain, domain):
+		return User{}, &SignInError{ReasonDomain, fmt.Errorf("%s isn't a %s Workspace account", email, domain)}
+	}
+	return User{Subject: idToken.Subject, Email: email, Name: claims.Name}, nil
+}
+
+func (o *OIDC) readFlow(r *http.Request, name string) (flow, error) {
+	var f flow
+	c, err := r.Cookie(o.cookie.name(name))
+	if err != nil {
+		return f, errors.New("no sign-in in progress in this browser")
+	}
+	payload64, sig64, ok := strings.Cut(c.Value, ".")
+	payload, err1 := base64.RawURLEncoding.DecodeString(payload64)
+	sig, err2 := base64.RawURLEncoding.DecodeString(sig64)
+	if !ok || err1 != nil || err2 != nil || !hmac.Equal(sig, o.sign(payload)) {
+		return f, errors.New("the sign-in cookie isn't ours")
+	}
+	if err := json.Unmarshal(payload, &f); err != nil {
+		return f, err
+	}
+	if time.Now().Unix() > f.Expires {
+		return f, errors.New("the sign-in took too long")
+	}
+	return f, nil
+}
+
+func (o *OIDC) sign(payload []byte) []byte {
+	mac := hmac.New(sha256.New, o.key)
+	mac.Write(payload)
+	return mac.Sum(nil)
+}
+
+func randomBytes() []byte {
+	b := make([]byte, 32)
+	_, _ = rand.Read(b) // crypto/rand.Read never fails
+	return b
+}
+
+func randomString() string { return base64.RawURLEncoding.EncodeToString(randomBytes()) }

@@ -50,7 +50,7 @@ func TestDealLifecycle(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.JSONEq(t, `[]`, w.Body.String())
 
-	memberID := decode[map[string]string](t, get(r, "/api/me"))["memberId"]
+	memberID := decode[map[string]any](t, get(r, "/api/me"))["memberId"].(string)
 	// The company is added along with the lead.
 	w = send(r, http.MethodPost, "/api/deals", `{"ownerId":"`+memberID+`","company":"Nordljus AB","dealType":"Event","semester":"HT 2026","nextStep":"Send intro email"}`)
 	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())

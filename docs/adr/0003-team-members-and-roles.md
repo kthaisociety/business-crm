@@ -1,6 +1,6 @@
 # 0003. Team members and their roles live in business-crm
 
-Status: Accepted
+Status: Accepted; who joins on sign-in superseded by 0004
 
 ## Context
 Deals have an owner, and the team wants to leave a lead unassigned, claim one, or hand it to someone

@@ -13,6 +13,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/kthaisociety/business-crm/frontend"
+	"github.com/kthaisociety/business-crm/internal/auth"
 	"github.com/kthaisociety/business-crm/internal/config"
 	"github.com/kthaisociety/business-crm/internal/database"
 	"github.com/kthaisociety/business-crm/internal/deals"
@@ -24,17 +25,28 @@ func main() {
 	_ = godotenv.Load()
 
 	cfg := config.Load()
-	if err := cfg.Validate(); err != nil {
+	err := cfg.Validate()
+	if err != nil {
 		log.Fatal(err)
 	}
-	if u := cfg.DevUser(); u != nil {
-		log.Printf("WARNING: every request is signed in as dev user %s (docs/pcr/0005)", u.Email)
-	} else {
-		log.Printf("no DEV_USER_EMAIL: the API refuses every request but health until identity-service sign-in exists")
-	}
-
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	var oidc *auth.OIDC
+	switch o := cfg.OIDC(); {
+	case o != nil:
+		discoverCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		oidc, err = auth.NewOIDC(discoverCtx, *o)
+		cancel()
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("signing in with %s for %s accounts; callback %s (docs/adr/0004)", o.Issuer, o.Domain, o.RedirectURL)
+	case cfg.DevUser() != nil:
+		log.Printf("WARNING: every request is signed in as dev user %s, for local work only (docs/pcr/0007)", cfg.DevUserEmail)
+	default:
+		log.Printf("no OIDC client and no DEV_USER_EMAIL: the API refuses every request but health")
+	}
 
 	db, err := database.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -44,12 +56,17 @@ func main() {
 		log.Fatal(err)
 	}
 
-	router := handlers.NewRouter(handlers.Deps{
+	deps := handlers.Deps{
 		PingDB:   func(ctx context.Context) error { return database.Ping(ctx, db) },
 		Frontend: frontend.Dist(),
 		DevUser:  cfg.DevUser(),
 		Deals:    deals.NewStore(db, cfg.AdminEmails...),
-	})
+	}
+	if oidc != nil {
+		deps.OIDC, deps.Sessions = oidc, auth.NewSessions(db, cfg.PublicURL)
+		deps.Deals.OnlyTeamMembers()
+	}
+	router := handlers.NewRouter(deps)
 
 	srv := &http.Server{
 		Addr:              net.JoinHostPort(cfg.Host, cfg.Port),

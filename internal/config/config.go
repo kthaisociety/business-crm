@@ -20,9 +20,17 @@ type Config struct {
 	// postgres://crm:crm@127.0.0.1:5436/crm?sslmode=disable.
 	DatabaseURL string
 
-	// DevUserEmail, when set, signs every request in as this user (docs/pcr/0005). Unset, the API refuses
-	// every request but health. Never set in production.
+	// DevUserEmail, when set, signs every request in as this user, for local work without an OIDC client
+	// (docs/pcr/0007). Never set in a deployed environment.
 	DevUserEmail string
+
+	// Real sign-in (docs/adr/0004): the provider, this app's client there, where the app is served (its
+	// callback is PUBLIC_URL/auth/callback), and the email domain that may sign in.
+	OIDCIssuer       string
+	OIDCClientID     string
+	OIDCClientSecret string
+	PublicURL        string
+	SignInDomain     string
 
 	// AdminEmails become admins when they sign in (docs/adr/0003), so a new environment has an admin.
 	AdminEmails []string
@@ -35,6 +43,28 @@ func Load() *Config {
 		DatabaseURL:  getEnv("DATABASE_URL", ""),
 		DevUserEmail: strings.TrimSpace(getEnv("DEV_USER_EMAIL", "")),
 		AdminEmails:  splitList(getEnv("ADMIN_EMAILS", "")),
+
+		OIDCIssuer:       strings.TrimSpace(getEnv("OIDC_ISSUER", "https://accounts.google.com")),
+		OIDCClientID:     strings.TrimSpace(getEnv("OIDC_CLIENT_ID", "")),
+		OIDCClientSecret: strings.TrimSpace(getEnv("OIDC_CLIENT_SECRET", "")),
+		PublicURL:        strings.TrimRight(strings.TrimSpace(getEnv("PUBLIC_URL", "")), "/"),
+		SignInDomain:     strings.TrimSpace(getEnv("SIGN_IN_DOMAIN", "kthais.com")),
+	}
+}
+
+// OIDC is the real sign-in's settings, or nil when no client is configured and the dev user (if any)
+// signs requests in instead.
+func (c *Config) OIDC() *auth.OIDCConfig {
+	if c.OIDCClientID == "" && c.OIDCClientSecret == "" {
+		return nil
+	}
+	return &auth.OIDCConfig{
+		Issuer:       c.OIDCIssuer,
+		ClientID:     c.OIDCClientID,
+		ClientSecret: c.OIDCClientSecret,
+		RedirectURL:  c.PublicURL + "/auth/callback",
+		Domain:       c.SignInDomain,
+		Google:       c.OIDCIssuer == "https://accounts.google.com",
 	}
 }
 
@@ -56,11 +86,35 @@ func (c *Config) Validate() error {
 			missing = append(missing, name)
 		}
 	}
+	if c.OIDC() != nil {
+		for name, value := range map[string]string{
+			"OIDC_ISSUER":        c.OIDCIssuer,
+			"OIDC_CLIENT_ID":     c.OIDCClientID,
+			"OIDC_CLIENT_SECRET": c.OIDCClientSecret,
+			"PUBLIC_URL":         c.PublicURL,
+			"SIGN_IN_DOMAIN":     c.SignInDomain,
+		} {
+			if value == "" {
+				missing = append(missing, name)
+			}
+		}
+	}
 	if len(missing) > 0 {
 		slices.Sort(missing)
 		return fmt.Errorf("missing required environment variables: %s", strings.Join(missing, ", "))
 	}
+	if c.OIDC() != nil && c.DevUserEmail != "" {
+		return fmt.Errorf("DEV_USER_EMAIL and an OIDC client are both set: unset DEV_USER_EMAIL to sign in for real (docs/pcr/0007)")
+	}
+	if c.OIDC() != nil && !strings.HasPrefix(c.PublicURL, "https://") && !isLoopback(c.PublicURL) {
+		return fmt.Errorf("PUBLIC_URL must be https, or http on 127.0.0.1 or localhost for local work")
+	}
 	return nil
+}
+
+func isLoopback(url string) bool {
+	return strings.HasPrefix(url, "http://127.0.0.1:") || strings.HasPrefix(url, "http://localhost:") ||
+		url == "http://127.0.0.1" || url == "http://localhost"
 }
 
 // splitList reads a comma-separated list, dropping blanks.

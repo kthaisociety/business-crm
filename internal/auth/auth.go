@@ -1,6 +1,6 @@
-// Package auth tells handlers who is signed in (docs/pcr/0005). Until identity-service is live, the user is
-// simulated: the dev user from config; with none configured, every request is refused. identity-service's
-// sign-in replaces Middleware; handlers keep calling Current.
+// Package auth tells handlers who is signed in: from a session after a real OIDC sign-in (docs/adr/0004),
+// or, for local work without a client, the dev user from config (docs/pcr/0007). With neither, every
+// request is refused. Either way, handlers call Current.
 package auth
 
 import (
@@ -18,7 +18,7 @@ type User struct {
 
 const userKey = "auth.user"
 
-// Middleware signs every request in as dev, or answers 401 when dev is nil.
+// Middleware signs every request in as the dev user, or answers 401 when dev is nil.
 func Middleware(dev *User) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if dev == nil {

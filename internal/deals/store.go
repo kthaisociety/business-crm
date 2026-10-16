@@ -21,10 +21,21 @@ var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]
 type Store struct {
 	db     *gorm.DB
 	admins []string // emails made admins when they sign in (docs/adr/0003)
+	// Whether only people already on the team are let in (real sign-in, docs/adr/0004), rather than
+	// anyone signed in joining as a member (the dev user).
+	onlyTeam bool
 }
 
 func NewStore(db *gorm.DB, adminEmails ...string) *Store {
 	return &Store{db: db, admins: adminEmails}
+}
+
+// OnlyTeamMembers makes the store, for real sign-in (docs/adr/0004), let in only people already on the
+// team, or in ADMIN_EMAILS: no request adds anyone else, so a removal can't be undone by a sign-in or a
+// request already under way.
+func (s *Store) OnlyTeamMembers() *Store {
+	s.onlyTeam = true
+	return s
 }
 
 // withEverything loads a deal's company, contact, owner, support and timeline (oldest first) along with it.
@@ -235,14 +246,30 @@ func contactAt(tx *gorm.DB, id string, company Company) (Contact, error) {
 	return c, err
 }
 
-// memberFor finds the signed-in user's member row, adding it as a member the first time they sign in,
-// and makes them an admin if ADMIN_EMAILS names them.
+func (s *Store) isAdminEmail(email string) bool {
+	return slices.ContainsFunc(s.admins, func(e string) bool { return strings.EqualFold(e, email) })
+}
+
+// memberFor finds the signed-in user's member row, taking their name from sign-in, and makes them an
+// admin if ADMIN_EMAILS names them. Someone not on the team is added as a member, unless only team
+// members are let in (OnlyTeamMembers): then it's ErrNotOnTeam, except for ADMIN_EMAILS.
 func (s *Store) memberFor(tx *gorm.DB, u auth.User) (Member, error) {
 	name := u.Name
 	if name == "" {
 		name = u.Email
 	}
 	m := Member{Email: strings.ToLower(u.Email), Name: name}
+	if s.onlyTeam && !s.isAdminEmail(u.Email) {
+		// The lock waits out a removal under way, and holds off one until this transaction ends.
+		err := tx.Clauses(clause.Locking{Strength: "NO KEY UPDATE"}).Where("email = ?", m.Email).Take(&m).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return m, ErrNotOnTeam
+		}
+		if err != nil || m.Name == name {
+			return m, err
+		}
+		return m, tx.Model(&m).Update("name", name).Error
+	}
 	err := tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "email"}},
 		DoUpdates: clause.AssignmentColumns([]string{"name"}),
@@ -254,7 +281,7 @@ func (s *Store) memberFor(tx *gorm.DB, u auth.User) (Member, error) {
 	if err := tx.Where("id = ?", m.ID).Take(&m).Error; err != nil {
 		return m, err
 	}
-	if m.Role != "admin" && slices.ContainsFunc(s.admins, func(e string) bool { return strings.EqualFold(e, u.Email) }) {
+	if m.Role != "admin" && s.isAdminEmail(u.Email) {
 		m.Role = "admin"
 		err = tx.Model(&m).Update("role", "admin").Error
 	}
