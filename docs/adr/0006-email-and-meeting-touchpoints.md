@@ -45,11 +45,12 @@ company's replies.
   missed.
 
 ### Fathom: the team's workspace
-- The team uses one Fathom workspace, each member in it with their kthais.com email. Fathom posts a
-  meeting once its notes are ready to `POST /api/integrations/fathom`: one webhook for the workspace if
-  Fathom offers that, otherwise one per member. The route is outside sign-in and checks Fathom's
-  signature with the webhook's secret (env, or stored like the Gmail token if there's one per member). An
-  unsigned or wrongly signed call gets 401.
+- The team uses one Fathom workspace, each member in it with their kthais.com email. One webhook,
+  added by one member and triggered for their own and **shared team recordings**, gets every meeting
+  shared with the team. Fathom posts a meeting once its notes are ready to `POST
+  /api/integrations/fathom`. The route is outside sign-in and checks Fathom's signature (Standard
+  Webhooks: HMAC-SHA256 of id, timestamp and body, within 5 minutes) with the webhook's secret,
+  `FATHOM_WEBHOOK_SECRET`. An unsigned, wrongly signed or stale call gets 401.
 - Invitees' emails are matched to contacts the same way. A matching meeting becomes a `meeting`
   touchpoint with its title, Fathom's summary and action items as bullet points, and a link to the
   recording. `external_id` is Fathom's meeting id. A meeting with no contact is dropped.
@@ -85,4 +86,3 @@ laptop never holds companies' real email (PCR 0007).
 
 ## Still open
 - Whether to add AI summaries and key notes after the snippet (above): the team's call.
-- Whether Fathom offers one webhook for the whole workspace: checked against Fathom's docs when it's built.
