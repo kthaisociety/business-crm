@@ -197,8 +197,8 @@ func (r *run) sync(ctx context.Context) error {
 	return r.backfill(ctx)
 }
 
-// backfill reads the last Backfill of mail page by page, saving the next page after each, and moves the
-// checkpoint to where it started once it's done.
+// backfill reads the last Backfill of mail page by page, saving its place after each message, and moves
+// the checkpoint to where it started once it's done.
 func (r *run) backfill(ctx context.Context) error {
 	if r.row.BackfillHistory == nil {
 		// Taken before listing, so nothing that arrives meanwhile is missed.
@@ -208,11 +208,11 @@ func (r *run) backfill(ctx context.Context) error {
 		}
 		empty := ""
 		r.row.BackfillHistory, r.row.BackfillPage = &start, &empty
-		if err := r.save(map[string]any{"backfill_history": start, "backfill_page": "", "history_id": nil}); err != nil {
+		if err := r.save(map[string]any{"backfill_history": start, "backfill_page": "", "backfill_done": 0, "history_id": nil}); err != nil {
 			return err
 		}
 	}
-	page := ""
+	page, done := "", r.row.BackfillDone
 	if r.row.BackfillPage != nil {
 		page = *r.row.BackfillPage
 	}
@@ -221,63 +221,72 @@ func (r *run) backfill(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := r.record(ctx, ids); err != nil {
-			return err
+		for i := min(done, len(ids)); i < len(ids); i++ {
+			if err := r.recordOne(ctx, ids[i]); err != nil {
+				return err
+			}
+			if err := r.save(map[string]any{"backfill_done": i + 1}); err != nil {
+				return err
+			}
 		}
 		if next == "" {
-			return r.save(map[string]any{"history_id": *r.row.BackfillHistory, "backfill_history": nil, "backfill_page": nil})
+			return r.save(map[string]any{"history_id": *r.row.BackfillHistory, "backfill_history": nil, "backfill_page": nil, "backfill_done": 0})
 		}
-		if err := r.save(map[string]any{"backfill_page": next}); err != nil {
+		if err := r.save(map[string]any{"backfill_page": next, "backfill_done": 0}); err != nil {
 			return err
 		}
-		page = next
+		page, done = next, 0
 	}
 }
 
-// history reads what changed since the checkpoint page by page, moving the checkpoint after each page.
+// history reads what changed since the checkpoint, moving the checkpoint past each history record once
+// its messages are recorded, and to the mailbox's latest history id at the end.
 func (r *run) history(ctx context.Context, from string) error {
 	page := ""
 	for {
-		ids, checkpoint, next, err := r.m.since(ctx, from, page)
+		records, latest, next, err := r.m.since(ctx, from, page)
 		if err != nil {
 			return err
 		}
-		if err := r.record(ctx, ids); err != nil {
-			return err
-		}
-		if checkpoint != "" {
-			if err := r.save(map[string]any{"history_id": checkpoint}); err != nil {
+		for _, rec := range records {
+			for _, id := range rec.messages {
+				if err := r.recordOne(ctx, id); err != nil {
+					return err
+				}
+			}
+			if err := r.save(map[string]any{"history_id": rec.id}); err != nil {
 				return err
 			}
 		}
 		if next == "" {
-			return nil
+			if latest == "" {
+				return nil
+			}
+			return r.save(map[string]any{"history_id": latest})
 		}
 		page = next
 	}
 }
 
-// record fetches each message and records those with a contact on them.
-func (r *run) record(ctx context.Context, ids []string) error {
-	for _, id := range ids {
-		if err := r.stillConnected(); err != nil {
-			return err
-		}
-		msg, err := r.m.message(ctx, id)
-		if errors.Is(err, errGone) {
-			continue // deleted since it was listed
-		}
-		if err != nil {
-			return err
-		}
-		if t, ok := touchpointOf(msg, r.m.email); ok {
-			t.Guard = r.guard
-			if _, err := r.s.record(ctx, t); err != nil {
-				return err
-			}
-		}
+// recordOne fetches a message and records it if it has a contact on it.
+func (r *run) recordOne(ctx context.Context, id string) error {
+	if err := r.stillConnected(); err != nil {
+		return err
 	}
-	return nil
+	msg, err := r.m.message(ctx, id)
+	if errors.Is(err, errGone) {
+		return nil // deleted since it was listed
+	}
+	if err != nil {
+		return err
+	}
+	t, ok := touchpointOf(msg, r.m.email)
+	if !ok {
+		return nil
+	}
+	t.Guard = r.guard
+	_, err = r.s.record(ctx, t)
+	return err
 }
 
 func syncError(err error) string {
@@ -411,7 +420,7 @@ func (m *mailbox) historyID(ctx context.Context) (string, error) {
 // recent lists one page of the ids of messages from the last `back`, and the next page's token, or ""
 // on the last page.
 func (m *mailbox) recent(ctx context.Context, back time.Duration, pageToken string) ([]string, string, error) {
-	q := url.Values{"q": {fmt.Sprintf("newer_than:%dd", int(back.Hours()/24))}, "maxResults": {"500"}}
+	q := url.Values{"q": {fmt.Sprintf("newer_than:%dd", int(back.Hours()/24))}, "maxResults": {"100"}}
 	if pageToken != "" {
 		q.Set("pageToken", pageToken)
 	}
@@ -431,11 +440,17 @@ func (m *mailbox) recent(ctx context.Context, back time.Duration, pageToken stri
 	return ids, page.NextPageToken, nil
 }
 
-// since lists one page of the messages added after history, or taken out of spam or trash since (they
-// were skipped while there), and the checkpoint to carry on from once they're recorded: the page's last
-// history record, or on the last page the mailbox's current history id.
-func (m *mailbox) since(ctx context.Context, history, pageToken string) (ids []string, checkpoint, next string, err error) {
-	q := url.Values{"startHistoryId": {history}, "historyTypes": {"messageAdded", "labelRemoved"}, "maxResults": {"500"}}
+// historyRecord is one change in a mailbox's history, and the messages it brings to sync.
+type historyRecord struct {
+	id       string
+	messages []string
+}
+
+// since lists one page of history after history: each record with the messages added in it, or taken
+// out of spam or trash (they were skipped while there); the mailbox's latest history id on the last
+// page; and the next page's token, or "".
+func (m *mailbox) since(ctx context.Context, history, pageToken string) (records []historyRecord, latest, next string, err error) {
+	q := url.Values{"startHistoryId": {history}, "historyTypes": {"messageAdded", "labelRemoved"}, "maxResults": {"100"}}
 	if pageToken != "" {
 		q.Set("pageToken", pageToken)
 	}
@@ -464,26 +479,22 @@ func (m *mailbox) since(ctx context.Context, history, pageToken string) (ids []s
 	if err != nil {
 		return nil, "", "", err
 	}
-	add := func(id string) {
-		if !slices.Contains(ids, id) {
-			ids = append(ids, id)
-		}
-	}
 	for _, h := range page.History {
+		rec := historyRecord{id: h.ID}
 		for _, added := range h.MessagesAdded {
-			add(added.Message.ID)
+			rec.messages = append(rec.messages, added.Message.ID)
 		}
 		for _, removed := range h.LabelsRemoved {
 			if slices.Contains(removed.LabelIDs, "SPAM") || slices.Contains(removed.LabelIDs, "TRASH") {
-				add(removed.Message.ID)
+				rec.messages = append(rec.messages, removed.Message.ID)
 			}
 		}
-		checkpoint = h.ID
+		records = append(records, rec)
 	}
 	if page.NextPageToken == "" {
-		checkpoint = page.HistoryID
+		latest = page.HistoryID
 	}
-	return ids, checkpoint, page.NextPageToken, nil
+	return records, latest, page.NextPageToken, nil
 }
 
 func (m *mailbox) message(ctx context.Context, id string) (message, error) {

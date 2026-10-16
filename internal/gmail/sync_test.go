@@ -572,3 +572,52 @@ func TestAnUnfinishedBackfillCarriesOn(t *testing.T) {
 		assert.Equal(t, 1, f.fetched[id], id)
 	}
 }
+
+// A page that takes longer than a sync's deadline still gets done: each run carries on from the message
+// after the last one it recorded, never starting the page over.
+func TestABackfillPageLongerThanTheDeadlineStillGetsDone(t *testing.T) {
+	f := newFakeGmail(t)
+	w := newWorld(t)
+	w.connect(t, "maja@example.com")
+	for _, id := range []string{"m1", "m2", "m3", "m4"} {
+		f.mail("token-maja@example.com", id, "lina.dahl@granit.example", "maja@example.com", "Mail "+id, nil, false)
+	}
+	defer gmail.SetSyncTimeout(300 * time.Millisecond)()
+	f.stallOn = "/messages/m3"
+	release := f.stall()
+
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+	assert.Len(t, w.emails(t), 2, "m1 and m2 before the deadline")
+
+	release()
+	f.stallOn = ""
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+	assert.Len(t, w.emails(t), 4)
+	assert.Equal(t, "100", w.historyID(t))
+	assert.Equal(t, 1, f.fetched["m1"], "the page carried on, not started over")
+	assert.Equal(t, 1, f.fetched["m2"])
+}
+
+func TestAHistoryPageLongerThanTheDeadlineStillGetsDone(t *testing.T) {
+	f := newFakeGmail(t)
+	w := newWorld(t)
+	w.connect(t, "maja@example.com")
+	tok := "token-maja@example.com"
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+	for _, id := range []string{"n1", "n2", "n3", "n4"} {
+		f.mail(tok, id, "lina.dahl@granit.example", "maja@example.com", "New "+id, nil, true)
+	}
+	defer gmail.SetSyncTimeout(300 * time.Millisecond)()
+	f.stallOn = "/messages/n3"
+	release := f.stall()
+
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+	assert.Equal(t, "102", w.historyID(t), "past n1 and n2")
+
+	release()
+	f.stallOn = ""
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+	assert.Len(t, w.emails(t), 4)
+	assert.Equal(t, "104", w.historyID(t))
+	assert.Equal(t, 1, f.fetched["n1"])
+}

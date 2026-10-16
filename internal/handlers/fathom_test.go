@@ -160,4 +160,3 @@ func TestWithoutASecretTheWebhookIsOff(t *testing.T) {
 	r := newTestRouter(builtUI)
 	assert.Equal(t, http.StatusNotFound, postMeeting(r, meetingPayload(t), fathomKey).Code)
 }
-

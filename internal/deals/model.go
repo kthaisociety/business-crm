@@ -79,8 +79,8 @@ type Activity struct {
 	Title        string
 	Body         string
 	BulletPoints []string `gorm:"serializer:json"`
-	URL          string // where a synced touchpoint came from: the recording, the email (docs/adr/0006)
-	Direction    string // an email's: sent by the team, or received; empty otherwise
+	URL          string   // where a synced touchpoint came from: the recording, the email (docs/adr/0006)
+	Direction    string   // an email's: sent by the team, or received; empty otherwise
 	OccurredAt   time.Time
 	CreatedAt    time.Time
 }
