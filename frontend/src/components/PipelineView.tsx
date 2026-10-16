@@ -33,7 +33,11 @@ export default function PipelineView({ deals, meId, onSelect, onMove }: Props) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div role="toolbar" aria-label="Filters" className="flex flex-wrap items-center gap-1.5 px-6 pt-4 pb-3">
+      <div
+        role="toolbar"
+        aria-label="Filters"
+        className="flex items-center gap-1.5 overflow-x-auto px-4 pt-4 pb-3 whitespace-nowrap md:flex-wrap md:px-6 [&>*]:shrink-0"
+      >
         <div className="mr-2 flex rounded-lg border border-gray-200 bg-white p-0.5">
           {(
             [

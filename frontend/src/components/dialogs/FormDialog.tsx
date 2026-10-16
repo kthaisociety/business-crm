@@ -121,7 +121,7 @@ export function DeleteButton({ what, onDelete }: { what: string; onDelete: () =>
   const [error, setError] = useState<string | null>(null)
   if (!confirming) {
     return (
-      <button type="button" onClick={() => setConfirming(true)} className="text-xs font-semibold text-red-600 hover:text-red-800">
+      <button type="button" onClick={() => setConfirming(true)} className="text-xs font-medium text-gray-500 hover:text-red-600">
         Delete
       </button>
     )

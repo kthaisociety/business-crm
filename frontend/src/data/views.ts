@@ -86,7 +86,7 @@ export function contactsFrom(contacts: Contact[], companies: Company[], deals: D
     .sort((a, b) => (a.contact.name || a.contact.email).localeCompare(b.contact.name || b.contact.email))
 }
 
-export type Bar = { label: string; value: number }
+export type Bar = { label: string; value: number; status?: Status }
 
 export type SemesterReport = {
   semester: string
@@ -140,7 +140,7 @@ export function reportFor(semester: string, all: Deal[], now = Date.now()): Seme
     paidSEK: sumFees(won.filter((d) => d.invoiceStatus === 'paid')),
     unpaidSEK: sumFees(won.filter(isUnpaid)),
     pipelineSEK: sumFees(deals.filter(isOpen).filter((d) => !isConfirmed(d))),
-    byStatus: STATUSES.map((s) => ({ label: s.label, value: statusCounts.get(s.id as Status) ?? 0 })),
+    byStatus: STATUSES.map((s) => ({ label: s.label, value: statusCounts.get(s.id as Status) ?? 0, status: s.id as Status })),
     confirmedByType: types.map((t) => ({ label: t, value: sumFees(won.filter((d) => d.dealType === t)) })),
     byOwner: [...ownerCounts]
       .map(([id, value]) => ({ label: ownerLabel(id), value }))

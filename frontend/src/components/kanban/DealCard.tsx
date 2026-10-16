@@ -58,12 +58,12 @@ export default function DealCard({ deal, onSelect }: Props) {
         </p>
       )}
 
-      <div className="mt-3 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
+        <div className="flex items-center gap-1.5 whitespace-nowrap">
           <Fee deal={deal} />
           {(deal.status === 'signed' || deal.status === 'finished') && <InvoiceBadge deal={deal} />}
         </div>
-        <div className="flex -space-x-1.5">
+        <div className="ml-auto flex -space-x-0.5">
           {!deal.owner && (
             <span className="rounded-full border border-dashed border-gray-300 px-1.5 py-0.5 text-[10px] text-gray-400">Unassigned</span>
           )}

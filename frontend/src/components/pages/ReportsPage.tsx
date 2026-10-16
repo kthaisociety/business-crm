@@ -2,6 +2,7 @@ import { compareSemesters, nudgeFor, type Deal } from '../../data/deals'
 import { reportFor, type Bar } from '../../data/views'
 import { formatSEK } from '../../format'
 import { NudgeBadge } from '../badges'
+import { statusColors } from '../statusColors'
 import { PageTitle, cell, headCell } from './common'
 
 type Props = {
@@ -36,7 +37,7 @@ function BarList({ title, bars, format = String }: { title: string; bars: Bar[];
             <span className="h-2.5">
               {bar.value > 0 && (
                 <span
-                  className="block h-full rounded-r bg-indigo-500"
+                  className={`block h-full rounded-r ${bar.status ? statusColors[bar.status] : 'bg-indigo-500'}`}
                   style={{ width: `${Math.max(2, (bar.value / max) * 100)}%` }}
                 />
               )}
