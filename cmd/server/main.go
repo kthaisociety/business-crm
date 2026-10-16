@@ -21,6 +21,8 @@ import (
 	"github.com/kthaisociety/business-crm/internal/database"
 	"github.com/kthaisociety/business-crm/internal/deals"
 	"github.com/kthaisociety/business-crm/internal/fathom"
+	"github.com/kthaisociety/business-crm/internal/gmail"
+	"github.com/kthaisociety/business-crm/internal/secretbox"
 	"github.com/kthaisociety/business-crm/internal/handlers"
 )
 
@@ -73,6 +75,17 @@ func main() {
 	if cfg.FathomWebhookSecret != "" {
 		deps.FathomKey, _ = fathom.Key(cfg.FathomWebhookSecret) // checked by Validate
 		log.Printf("taking Fathom meetings at /api/integrations/fathom (docs/adr/0006)")
+	}
+	if g := cfg.Gmail(); g != nil {
+		discoverCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		deps.GmailOIDC, err = auth.NewOIDC(discoverCtx, *g)
+		cancel()
+		if err != nil {
+			log.Fatal(err)
+		}
+		box, _ := secretbox.New(cfg.TokenEncryptionKey) // checked by Validate
+		deps.Gmail = gmail.NewConnections(db, box)
+		log.Printf("Connect Gmail is on; callback %s (docs/adr/0006)", g.RedirectURL)
 	}
 	if oidc != nil {
 		deps.OIDC, deps.Sessions = oidc, auth.NewSessions(db, cfg.PublicURL)

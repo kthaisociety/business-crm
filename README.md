@@ -61,6 +61,22 @@ to board or member. The command refuses while the team has an admin; `-force` is
 admin has left without handing over ([ADR 0005](docs/adr/0005-appoint-the-first-admin-once.md)). Locally,
 `go run ./cmd/seed` already makes the dev user an admin.
 
+## Connect Gmail
+
+Each member connects their own mailbox from the bar under the header (or the sidebar), through a second
+Google consent for reading Gmail; they can disconnect any time
+([ADR 0006](docs/adr/0006-email-and-meeting-touchpoints.md)). Setting it up, in the Google Cloud project
+of the OAuth client:
+
+- APIs & Services: enable the **Gmail API**
+- Google Auth Platform, Data Access: add the scope `https://www.googleapis.com/auth/gmail.readonly`
+  (no Google review needed: the client is Internal)
+- Clients: add `PUBLIC_URL/auth/gmail/callback` to the authorized redirect URIs
+- Set `TOKEN_ENCRYPTION_KEY` (`openssl rand -base64 32`), a secret like the client's
+
+Locally, connect only your own mailbox and use your own addresses as contacts
+([PCR 0007](docs/pcr/0007-real-sign-in-dev-user-for-local-work.md)).
+
 ## Fathom meetings
 
 Finished Fathom meetings with a contact among the invitees land on the timeline of that company's open
@@ -92,6 +108,8 @@ The schema is SQL files in `internal/database/migrations/`, applied by the serve
 | `GET /auth/login` | starts signing in: redirects to the OIDC provider |
 | `GET /auth/callback` | finishes signing in, and redirects to `/`, or to `/?sign-in=not-on-team`, `domain` or `failed` |
 | `POST /auth/logout` | signs this browser out: 204 |
+| `GET /auth/gmail/connect` | starts connecting the signed-in member's own Gmail; back to `/?gmail=connected`, `wrong-account`, `no-access` or `failed` |
+| `GET`, `DELETE /api/gmail` | your mailbox's connection: `{connected, email, connectedAt, syncedAt, syncError}`; DELETE disconnects and revokes it |
 | `POST /api/integrations/fathom` | Fathom's webhook: a finished meeting, signed with `FATHOM_WEBHOOK_SECRET` (401 otherwise); 204. Off without the secret |
 | `GET /api/me` | the signed-in user and who they are on the team: `{sub, email, name, memberId, role, canSignOut}`; 401 if no one is signed in |
 | `GET /api/deals` | every deal, with company, contact, owner, support and timeline |
@@ -119,6 +137,8 @@ All from env, read by the Go server ([PCR 0001](docs/pcr/0001-config-from-env.md
 | `OIDC_ISSUER` | no | default `https://accounts.google.com`; identity-service's URL once it's live |
 | `PUBLIC_URL` | no | where the app is served; the callback is `PUBLIC_URL/auth/callback`. https, except on 127.0.0.1 or localhost |
 | `SIGN_IN_DOMAIN` | no | the email domain that may sign in, default `kthais.com` |
+| `TOKEN_ENCRYPTION_KEY` | yes | 32 random bytes in base64; seals Gmail refresh tokens and turns on Connect Gmail ([ADR 0006](docs/adr/0006-email-and-meeting-touchpoints.md)) |
+| `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET` | the secret | Connect Gmail's Google client; default to the sign-in client while that's Google's |
 | `FATHOM_WEBHOOK_SECRET` | yes | the team's Fathom webhook secret, `whsec_…`; turns on `/api/integrations/fathom` ([ADR 0006](docs/adr/0006-email-and-meeting-touchpoints.md)) |
 | `DEV_USER_EMAIL` | no | without an OIDC client, signs every request in as this user; local work only ([PCR 0007](docs/pcr/0007-real-sign-in-dev-user-for-local-work.md)) |
 | `HOST`, `PORT` | no | default all interfaces, `8000` |

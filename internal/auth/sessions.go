@@ -76,6 +76,16 @@ func (s *Sessions) Middleware() gin.HandlerFunc {
 
 var errNoSession = errors.New("no session")
 
+// UserOf is who the request's session signs in, for pages a browser opens directly rather than the API.
+// ok is false without a valid session.
+func (s *Sessions) UserOf(r *http.Request) (u User, ok bool, err error) {
+	u, err = s.lookup(r)
+	if errors.Is(err, errNoSession) {
+		return User{}, false, nil
+	}
+	return u, err == nil, err
+}
+
 func (s *Sessions) lookup(r *http.Request) (User, error) {
 	token, ok := s.token(r)
 	if !ok {

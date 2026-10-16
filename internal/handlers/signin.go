@@ -15,7 +15,7 @@ import (
 // with ?sign-in=<reason> for the sign-in page to explain.
 func registerSignIn(r *gin.Engine, oidc *auth.OIDC, sessions *auth.Sessions, store *deals.Store) {
 	r.GET("/auth/login", func(c *gin.Context) {
-		c.Redirect(http.StatusFound, oidc.Begin(c.Writer))
+		c.Redirect(http.StatusFound, oidc.Begin(c.Writer, ""))
 	})
 
 	r.GET("/auth/callback", func(c *gin.Context) {

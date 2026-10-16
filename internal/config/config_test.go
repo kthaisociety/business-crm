@@ -89,3 +89,51 @@ func TestAFathomSecretMustBeFathoms(t *testing.T) {
 	t.Setenv("FATHOM_WEBHOOK_SECRET", "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw")
 	assert.NoError(t, Load().Validate())
 }
+
+const testTokenKey = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc="
+
+func TestGmailIsOffWithoutAKey(t *testing.T) {
+	setRequired(t)
+	setOIDC(t)
+
+	assert.Nil(t, Load().Gmail())
+}
+
+func TestGmailUsesTheGoogleSignInClient(t *testing.T) {
+	setRequired(t)
+	setOIDC(t)
+	t.Setenv("TOKEN_ENCRYPTION_KEY", testTokenKey)
+
+	cfg := Load()
+	require.NoError(t, cfg.Validate())
+	g := cfg.Gmail()
+	require.NotNil(t, g)
+	assert.Equal(t, "client", g.ClientID)
+	assert.Equal(t, "https://crm.example.com/auth/gmail/callback", g.RedirectURL)
+	assert.True(t, g.Offline)
+	assert.Contains(t, g.ExtraScopes, "https://www.googleapis.com/auth/gmail.readonly")
+}
+
+func TestGmailNeedsItsOwnClientOnceSignInIsntGoogle(t *testing.T) {
+	setRequired(t)
+	setOIDC(t)
+	t.Setenv("OIDC_ISSUER", "https://identity.example.com")
+	t.Setenv("TOKEN_ENCRYPTION_KEY", testTokenKey)
+	assert.ErrorContains(t, Load().Validate(), "GMAIL_CLIENT_ID")
+
+	t.Setenv("GMAIL_CLIENT_ID", "gmail-client")
+	t.Setenv("GMAIL_CLIENT_SECRET", "gmail-secret")
+	require.NoError(t, Load().Validate())
+	assert.Equal(t, "https://accounts.google.com", Load().Gmail().Issuer)
+}
+
+func TestGmailNeedsRealSignInAndAGoodKey(t *testing.T) {
+	setRequired(t)
+	t.Setenv("DEV_USER_EMAIL", "dev@kthais.com")
+	t.Setenv("TOKEN_ENCRYPTION_KEY", testTokenKey)
+	assert.ErrorContains(t, Load().Validate(), "needs real sign-in")
+
+	setOIDC(t)
+	t.Setenv("TOKEN_ENCRYPTION_KEY", "too-short")
+	assert.ErrorContains(t, Load().Validate(), "TOKEN_ENCRYPTION_KEY")
+}

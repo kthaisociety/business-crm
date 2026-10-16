@@ -10,6 +10,7 @@ import (
 
 	"github.com/kthaisociety/business-crm/internal/auth"
 	"github.com/kthaisociety/business-crm/internal/deals"
+	"github.com/kthaisociety/business-crm/internal/gmail"
 )
 
 // Companies and contacts. Deals point at them, so a company or contact with deals can't be deleted (409).
@@ -97,8 +98,19 @@ func adminOnly(store *deals.Store) gin.HandlerFunc {
 }
 
 // The team: everyone sees it; admins change it.
-func registerTeam(r *gin.RouterGroup, store *deals.Store) {
-	r.GET("/members", list(store.ListMembers))
+func registerTeam(r *gin.RouterGroup, store *deals.Store, conns *gmail.Connections) {
+	r.GET("/members", list(func(ctx context.Context) ([]deals.MemberView, error) {
+		members, err := store.ListMembers(ctx)
+		if err != nil || conns == nil {
+			return members, err
+		}
+		connected, err := conns.ConnectedMembers(ctx)
+		for i := range members {
+			c := connected[members[i].ID]
+			members[i].GmailConnected = &c
+		}
+		return members, err
+	}))
 	admin := r.Group("", adminOnly(store))
 	admin.POST("/members", create(store.AddMember))
 	admin.PATCH("/members/:id", patch(deals.ParseMemberPatch, store.UpdateMember))
