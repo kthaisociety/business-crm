@@ -1,4 +1,4 @@
-import { BarChart3, Building2, KanbanSquare, Mail, UserCog, Users } from 'lucide-react'
+import { BarChart3, Building2, KanbanSquare, LogOut, Mail, UserCog, Users } from 'lucide-react'
 import { NavLink } from 'react-router'
 import type { User } from '../../api'
 import { canSeeReports } from '../../data/deals'
@@ -6,6 +6,7 @@ import { canSeeReports } from '../../data/deals'
 type Props = {
   user: User | null
   userError: string | null
+  onSignOut: () => void
 }
 
 const pages = [
@@ -24,7 +25,7 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
     isActive ? 'bg-gray-100 font-semibold text-gray-900' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
   }`
 
-export default function Sidebar({ user, userError }: Props) {
+export default function Sidebar({ user, userError, onSignOut }: Props) {
   return (
     <aside className="hidden w-56 shrink-0 flex-col border-r border-gray-200 bg-white p-3 md:flex">
       <nav aria-label="Main" className="flex flex-col gap-0.5">
@@ -49,6 +50,11 @@ export default function Sidebar({ user, userError }: Props) {
       <div className="mt-auto border-t border-gray-100 pt-3 text-[11px] text-gray-500">
         {user && <p>Signed in as {user.email}</p>}
         {user?.role && <p className="mt-0.5 text-gray-400 capitalize">{user.role}</p>}
+        {user?.canSignOut && (
+          <button type="button" onClick={onSignOut} className="mt-2 flex items-center gap-1.5 text-gray-500 hover:text-gray-900">
+            <LogOut size={12} aria-hidden /> Sign out
+          </button>
+        )}
         {userError && <p className="text-red-600">{userError}</p>}
         {!user && !userError && <p>Loading…</p>}
       </div>

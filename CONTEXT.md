@@ -5,8 +5,10 @@ Words as this project uses them.
 - **Business CRM**: this app. The business team's CRM, for KTHAIS's relations with companies.
 - **Business team**: the KTHAIS team that runs company relations and partnerships.
 - **User**: the person signed in.
-- **Dev user**: the simulated user every request is signed in as until identity-service is live
-  ([PCR 0005](docs/pcr/0005-simulated-sign-in-until-identity-service.md)).
+- **Sign-in**: with an @kthais.com Google account through OIDC, for people an admin has added to the team;
+  it lasts 7 days per browser ([ADR 0004](docs/adr/0004-sign-in-with-oidc.md)).
+- **Dev user**: for local work without an OIDC client, the user every request is signed in as
+  ([PCR 0007](docs/pcr/0007-real-sign-in-dev-user-for-local-work.md)).
 - **Deal**: one piece of work with a company in one semester: an event, a partnership or a job post. A
   company can have many deals (one per semester, or several at once). Replaces a row in the team's deal
   log spreadsheet.

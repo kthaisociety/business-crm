@@ -19,10 +19,13 @@ type Deps struct {
 	PingDB func(ctx context.Context) error
 	// Frontend is the built frontend (frontend.Dist()).
 	Frontend fs.FS
-	// DevUser is who every request is signed in as until identity-service is live (docs/pcr/0005). Nil
-	// refuses every request but health.
-	DevUser *auth.User
-	Deals   *deals.Store
+	// Real sign-in (docs/adr/0004): with OIDC and Sessions set, requests are signed in from their session
+	// cookie. Otherwise DevUser signs every request in, for local work (docs/pcr/0007); with neither, every
+	// request but health is refused.
+	OIDC     *auth.OIDC
+	Sessions *auth.Sessions
+	DevUser  *auth.User
+	Deals    *deals.Store
 }
 
 func NewRouter(d Deps) *gin.Engine {
@@ -32,8 +35,13 @@ func NewRouter(d Deps) *gin.Engine {
 	api := r.Group("/api", limitBody(maxBodyBytes))
 	api.GET("/health", health(d.PingDB))
 
-	signedIn := api.Group("", auth.Middleware(d.DevUser))
-	signedIn.GET("/me", me(d.Deals))
+	signIn := auth.Middleware(d.DevUser)
+	if d.Sessions != nil {
+		signIn = d.Sessions.Middleware()
+		registerSignIn(r, d.OIDC, d.Sessions, d.Deals)
+	}
+	signedIn := api.Group("", signIn)
+	signedIn.GET("/me", me(d.Deals, d.Sessions != nil))
 	signedIn.GET("/deals", listDeals(d.Deals))
 	signedIn.POST("/deals", createDeal(d.Deals))
 	signedIn.GET("/deals/:id", getDeal(d.Deals))
@@ -56,12 +64,13 @@ func health(pingDB func(ctx context.Context) error) gin.HandlerFunc {
 	}
 }
 
-// me is the signed-in user and, with a store, who they are on the team: signing in adds them to it.
-func me(store *deals.Store) gin.HandlerFunc {
+// me is the signed-in user and, with a store, who they are on the team; canSignOut is false for the dev
+// user, who is always signed in.
+func me(store *deals.Store, canSignOut bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := auth.Current(c)
 		if store == nil {
-			c.JSON(http.StatusOK, user)
+			c.JSON(http.StatusOK, gin.H{"sub": user.Subject, "email": user.Email, "name": user.Name, "canSignOut": canSignOut})
 			return
 		}
 		member, err := store.SignIn(c.Request.Context(), user)
@@ -69,7 +78,7 @@ func me(store *deals.Store) gin.HandlerFunc {
 			fail(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"sub": user.Subject, "email": user.Email, "name": user.Name, "memberId": member.ID, "role": member.Role})
+		c.JSON(http.StatusOK, gin.H{"sub": user.Subject, "email": user.Email, "name": user.Name, "memberId": member.ID, "role": member.Role, "canSignOut": canSignOut})
 	}
 }
 

@@ -36,6 +36,26 @@ func (s *Store) SignIn(ctx context.Context, u auth.User) (MemberView, error) {
 	return viewOfMember(m), err
 }
 
+// ErrNotOnTeam refuses a real sign-in by someone no admin has added (docs/adr/0004).
+var ErrNotOnTeam = errors.New("not on the team: ask an admin to add you")
+
+// Admit lets someone who signed in for real (docs/adr/0004) in if they're on the team or in ADMIN_EMAILS,
+// taking their name from the provider, and returns who they are on the team. Anyone else gets
+// ErrNotOnTeam.
+func (s *Store) Admit(ctx context.Context, u auth.User) (MemberView, error) {
+	if !s.isAdminEmail(u.Email) {
+		var exists bool
+		err := s.db.WithContext(ctx).Raw("SELECT EXISTS (SELECT 1 FROM members WHERE email = ?)", strings.ToLower(u.Email)).Scan(&exists).Error
+		if err != nil {
+			return MemberView{}, err
+		}
+		if !exists {
+			return MemberView{}, ErrNotOnTeam
+		}
+	}
+	return s.SignIn(ctx, u)
+}
+
 // RequireAdmin is nil if the signed-in user is an admin, and a ForbiddenError otherwise.
 func (s *Store) RequireAdmin(ctx context.Context, u auth.User) error {
 	me, err := s.SignIn(ctx, u)

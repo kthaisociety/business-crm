@@ -20,6 +20,9 @@ import {
   updateCompany,
   updateContact,
   updateDeal,
+  ApiError,
+  SIGNED_OUT,
+  signOut,
   type DealPatch,
   type NewLeadInput,
   type User,
@@ -31,6 +34,7 @@ import Sidebar, { MobileNav } from './components/layout/Sidebar'
 import CompaniesPage, { type CompanyActions } from './components/pages/CompaniesPage'
 import ContactsPage, { type ContactActions } from './components/pages/ContactsPage'
 import ReportsPage from './components/pages/ReportsPage'
+import SignInPage from './components/pages/SignInPage'
 import TeamPage, { type TeamActions } from './components/pages/TeamPage'
 import PipelineView from './components/PipelineView'
 import {
@@ -82,6 +86,8 @@ export default function App() {
   useMinuteTick()
   const [user, setUser] = useState<User | null>(null)
   const [userError, setUserError] = useState<string | null>(null)
+  // No one is signed in, or the session ended: the sign-in page shows instead of the app.
+  const [signedOut, setSignedOut] = useState(false)
   const [data, setData] = useState<Data | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   // A save or refresh that failed, shown above the board; a failed refresh can be retried on its own.
@@ -97,9 +103,16 @@ export default function App() {
       .then(setUser)
       .catch((err: unknown) => {
         if (controller.signal.aborted) return
-        setUserError(messageOf(err))
+        if (err instanceof ApiError && err.status === 401) setSignedOut(true)
+        else setUserError(messageOf(err))
       })
     return () => controller.abort()
+  }, [])
+
+  useEffect(() => {
+    const onSignedOut = () => setSignedOut(true)
+    window.addEventListener(SIGNED_OUT, onSignedOut)
+    return () => window.removeEventListener(SIGNED_OUT, onSignedOut)
   }, [])
 
   // Reloads of everything, numbered: only the latest one's answer applies.
@@ -352,6 +365,17 @@ export default function App() {
   const inSemester = all.filter((deal) => deal.semester === semester)
   const selected = all.find((deal) => deal.id === selectedId)
 
+  if (signedOut) return <SignInPage reason={new URLSearchParams(window.location.search).get('sign-in')} />
+
+  const leave = async () => {
+    try {
+      await signOut()
+      setSignedOut(true)
+    } catch (err) {
+      setNotice({ message: `Couldn't sign out: ${messageOf(err)}` })
+    }
+  }
+
   return (
     <div className="flex h-screen flex-col bg-gray-50 font-sans text-gray-900">
       <Header
@@ -369,7 +393,7 @@ export default function App() {
       />
       <MobileNav user={user} />
       <div className="flex min-h-0 flex-1">
-        <Sidebar user={user} userError={userError} />
+        <Sidebar user={user} userError={userError} onSignOut={() => void leave()} />
         <main className="flex min-w-0 flex-1 flex-col">
           {notice && (
             <p role="alert" className="mx-6 mt-4 flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">

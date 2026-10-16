@@ -34,3 +34,19 @@ func TestDevUserIsSignedIn(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), `"email":"dev@kthais.com"`)
 }
+
+func TestCookiesOnHTTPSAreSecureAndHostOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+
+	assert.NoError(t, NewSessions(nil, "https://crm.example.com").End(c))
+
+	cookies := w.Result().Cookies()
+	assert.Len(t, cookies, 1)
+	assert.Equal(t, "__Host-crm_session", cookies[0].Name)
+	assert.True(t, cookies[0].Secure)
+	assert.True(t, cookies[0].HttpOnly)
+	assert.Equal(t, "/", cookies[0].Path)
+}

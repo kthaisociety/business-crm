@@ -10,8 +10,8 @@ export default defineConfig({
     host: '127.0.0.1',
     // 5173 is growth-portal's.
     port: 5174,
-    // The Go server serves /api; in dev, Vite forwards to it (`go run ./cmd/server`).
-    proxy: { '/api': 'http://127.0.0.1:8002' },
+    // The Go server serves /api and sign-in (/auth); in dev, Vite forwards to it (`go run ./cmd/server`).
+    proxy: { '/api': 'http://127.0.0.1:8002', '/auth': 'http://127.0.0.1:8002' },
   },
   test: {
     environment: 'jsdom',

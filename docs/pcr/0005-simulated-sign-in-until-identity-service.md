@@ -1,6 +1,6 @@
 # 0005. Simulate a signed-in user until identity-service is live
 
-Status: Accepted
+Status: Superseded by 0007
 
 ## Convention
 - Until identity-service is live, the app simulates a signed-in user: `internal/auth` signs every request

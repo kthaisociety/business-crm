@@ -237,6 +237,10 @@ func contactAt(tx *gorm.DB, id string, company Company) (Contact, error) {
 
 // memberFor finds the signed-in user's member row, adding it as a member the first time they sign in,
 // and makes them an admin if ADMIN_EMAILS names them.
+func (s *Store) isAdminEmail(email string) bool {
+	return slices.ContainsFunc(s.admins, func(e string) bool { return strings.EqualFold(e, email) })
+}
+
 func (s *Store) memberFor(tx *gorm.DB, u auth.User) (Member, error) {
 	name := u.Name
 	if name == "" {
@@ -254,7 +258,7 @@ func (s *Store) memberFor(tx *gorm.DB, u auth.User) (Member, error) {
 	if err := tx.Where("id = ?", m.ID).Take(&m).Error; err != nil {
 		return m, err
 	}
-	if m.Role != "admin" && slices.ContainsFunc(s.admins, func(e string) bool { return strings.EqualFold(e, u.Email) }) {
+	if m.Role != "admin" && s.isAdminEmail(u.Email) {
 		m.Role = "admin"
 		err = tx.Model(&m).Update("role", "admin").Error
 	}

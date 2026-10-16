@@ -7,10 +7,16 @@ export type User = {
   sub: string
   email: string
   name: string
-  // Who they are on the team; signing in adds them to it (docs/adr/0003).
+  // Who they are on the team (docs/adr/0003).
   memberId?: string
   role?: Role
+  // False for the dev user, who is always signed in (docs/pcr/0007).
+  canSignOut?: boolean
 }
+
+// Fired when the server answers 401: the session ended, so the app shows the sign-in page.
+export const SIGNED_OUT = 'crm:signed-out'
+
 
 // A failed API call. The message is the server's reason when it gave one (400s say what was wrong).
 export class ApiError extends Error {
@@ -29,6 +35,7 @@ async function call<T>(method: string, path: string, body?: unknown, signal?: Ab
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   if (!res.ok) {
+    if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT))
     let reason = ''
     try {
       reason = (await res.json()).error ?? ''
@@ -43,10 +50,13 @@ async function call<T>(method: string, path: string, body?: unknown, signal?: Ab
 export async function fetchMe(signal?: AbortSignal): Promise<User> {
   const res = await fetch('/api/me', { signal })
   if (!res.ok) {
-    throw new Error(`Loading the signed-in user failed (${res.status})`)
+    throw new ApiError(res.status, `Loading the signed-in user failed (${res.status})`)
   }
   return res.json()
 }
+
+// Ends this browser's session (docs/adr/0004).
+export const signOut = () => call<void>('POST', '/auth/logout')
 
 export const fetchDeals = (signal?: AbortSignal) => call<Deal[]>('GET', '/api/deals', undefined, signal)
 
