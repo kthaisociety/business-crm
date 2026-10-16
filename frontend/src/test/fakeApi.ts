@@ -47,7 +47,7 @@ export function stubApi(
     role?: Role
     firstSignIn?: boolean
     signedIn?: boolean
-    gmail?: 'connected' | 'not-connected'
+    gmail?: 'connected' | 'not-connected' | 'reconnect'
   } = {},
 ): FakeApi {
   const role = options.role ?? 'admin'

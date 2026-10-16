@@ -13,7 +13,7 @@ import (
 
 // registerGmail adds Connect Gmail (docs/adr/0006): a second Google consent, for the signed-in member's
 // own mailbox only. The callback always ends on the app, with ?gmail=<outcome> for it to show.
-func registerGmail(r *gin.Engine, api *gin.RouterGroup, google *auth.OIDC, sessions *auth.Sessions, conns *gmail.Connections) {
+func registerGmail(r *gin.Engine, api *gin.RouterGroup, google *auth.OIDC, sessions *auth.Sessions, conns *gmail.Connections, sync *gmail.Syncer) {
 	back := func(c *gin.Context, outcome string) {
 		c.Redirect(http.StatusFound, "/?"+url.Values{"gmail": {outcome}}.Encode())
 	}
@@ -64,6 +64,9 @@ func registerGmail(r *gin.Engine, api *gin.RouterGroup, google *auth.OIDC, sessi
 			_ = c.Error(err)
 			back(c, "failed")
 			return
+		}
+		if sync != nil {
+			sync.Kick()
 		}
 		back(c, "connected")
 	})

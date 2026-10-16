@@ -71,6 +71,8 @@ export type Activity = {
   bulletPoints?: string[]
   // A synced entry's origin: the Fathom recording, or the email in Gmail.
   url?: string
+  // A synced email's: sent by the team, or received from outside.
+  direction?: 'sent' | 'received'
 }
 
 export type Deal = {

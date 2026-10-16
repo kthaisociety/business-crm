@@ -24,10 +24,18 @@ type Touchpoint struct {
 	Emails []string
 	// The team member whose mailbox or recording it is, by email: its author, if they're on the team.
 	By string
+	// An email's sender. Sent by someone on the team, it's "sent" and they're its author; otherwise
+	// "received". So the same email reads the same way whichever member's mailbox it was found in.
+	From string
+	// Guard, if set, runs first in the transaction that records the touchpoint, and stops it with its
+	// error: e.g. a Gmail sync checking the mailbox is still connected, so nothing lands after the
+	// member is removed or disconnects.
+	Guard func(tx *gorm.DB) error
 }
 
 // Record puts a touchpoint on the deals of every company with a contact on it: the company's open deals,
-// or its latest deal when none is open. It returns how many deals it was added to or updated on: 0 with
+// or its latest deal when none is open. A team member's address never counts as a contact, even if
+// someone added it as one: they're on every email in their own mailbox. It returns how many deals it was added to or updated on: 0 with
 // no contact on it, when nothing is stored. The same touchpoint recorded again updates it in place, so a
 // Fathom summary written again replaces the old one, and it's never there twice.
 func (s *Store) Record(ctx context.Context, t Touchpoint) (int, error) {
@@ -42,9 +50,17 @@ func (s *Store) Record(ctx context.Context, t Touchpoint) (int, error) {
 	}
 	recorded := 0
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if t.Guard != nil {
+			if err := t.Guard(tx); err != nil {
+				return err
+			}
+		}
 		var dealIDs []string
 		err := tx.Raw(`
-			WITH matched AS (SELECT DISTINCT company_id FROM contacts WHERE lower(email) IN ?)
+			WITH matched AS (
+				SELECT DISTINCT company_id FROM contacts
+				WHERE lower(email) IN ? AND lower(email) NOT IN (SELECT email FROM members)
+			)
 			SELECT d.id FROM deals d JOIN matched m ON m.company_id = d.company_id
 			WHERE d.status NOT IN ('finished', 'canceled')
 			UNION
@@ -58,14 +74,23 @@ func (s *Store) Record(ctx context.Context, t Touchpoint) (int, error) {
 			return err
 		}
 		var author *string
-		if t.By != "" {
-			var m Member
-			if err := tx.Where("email = ?", strings.ToLower(t.By)).Limit(1).Find(&m).Error; err != nil {
+		direction := ""
+		if t.Type == "email" {
+			direction = "received"
+			sender, err := memberByEmail(tx, t.From)
+			if err != nil {
 				return err
 			}
-			if m.ID != "" {
-				author = &m.ID
+			if sender != nil {
+				direction, author = "sent", sender
 			}
+		}
+		if author == nil {
+			by, err := memberByEmail(tx, t.By)
+			if err != nil {
+				return err
+			}
+			author = by
 		}
 		points := t.BulletPoints
 		if points == nil {
@@ -78,6 +103,7 @@ func (s *Store) Record(ctx context.Context, t Touchpoint) (int, error) {
 			}).Create(&Activity{
 				DealID: dealID, Type: t.Type, Source: t.Source, ExternalID: &t.ExternalID, AuthorID: author,
 				Title: t.Title, Body: t.Body, BulletPoints: points, URL: t.URL, OccurredAt: t.OccurredAt,
+				Direction: direction,
 			})
 			if res.Error != nil {
 				return res.Error
@@ -87,4 +113,20 @@ func (s *Store) Record(ctx context.Context, t Touchpoint) (int, error) {
 		return nil
 	})
 	return recorded, err
+}
+
+// memberByEmail is the id of the team member with this email, or nil.
+func memberByEmail(tx *gorm.DB, email string) (*string, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return nil, nil
+	}
+	var m Member
+	if err := tx.Where("email = ?", email).Limit(1).Find(&m).Error; err != nil {
+		return nil, err
+	}
+	if m.ID == "" {
+		return nil, nil
+	}
+	return &m.ID, nil
 }

@@ -54,4 +54,3 @@ func fathomWebhook(key []byte, store *deals.Store) gin.HandlerFunc {
 		c.Status(http.StatusNoContent)
 	}
 }
-

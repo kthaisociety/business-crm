@@ -421,7 +421,8 @@ export default function App() {
       <MobileNav user={user} onSignOut={() => void leave()} onDisconnectGmail={() => void disconnect()} />
       <GmailBar
         outcome={gmailOutcome}
-        ask={user?.gmail === 'not-connected' && !gmailLater}
+        ask={(user?.gmail === 'not-connected' || user?.gmail === 'reconnect') && !gmailLater}
+        reconnect={user?.gmail === 'reconnect'}
         onLater={() => setGmailLater(true)}
         onDismissOutcome={() => setGmailOutcome(null)}
       />

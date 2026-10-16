@@ -1024,6 +1024,37 @@ test('phones can connect and disconnect Gmail too', async () => {
   expect(await within(phone).findByRole('link', { name: 'Connect Gmail' })).toHaveAttribute('href', '/auth/gmail/connect')
 })
 
+test('a synced email shows which way it went, and opens in Gmail', async () => {
+  await renderApp()
+  const drawer = open('Fjällbacka Ventures')
+
+  const email = within(drawer).getByText('Re: Founders dinner').closest('li')!
+  expect(email).toHaveTextContent('Received')
+  expect(email).toHaveTextContent('via Gmail')
+  expect(email).toHaveTextContent('Could you send a one-pager')
+  expect(within(email).getByRole('link', { name: 'Open in Gmail' })).toHaveAttribute('href', expect.stringContaining('mail.google.com'))
+})
+
+test('an email in a teammate’s Gmail says whose, instead of a link that can’t open', async () => {
+  api.deals.find((d) => d.id === 'fjallbacka')!.activities.find((a) => a.id === 'fjallbacka-3')!.url =
+    'https://mail.google.com/mail/?authuser=noah.ek%40example.com#all/made-up'
+  await renderApp()
+  const drawer = open('Fjällbacka Ventures')
+
+  const email = within(drawer).getByText('Re: Founders dinner').closest('li')!
+  expect(within(email).queryByRole('link', { name: 'Open in Gmail' })).not.toBeInTheDocument()
+  expect(email).toHaveTextContent('In Noah Ek’s Gmail')
+})
+
+test('when Google withdraws access, the member is asked to reconnect', async () => {
+  api = stubApi({ gmail: 'reconnect' })
+  await renderApp()
+
+  const bar = screen.getByText(/Google stopped letting Lucid read your Gmail/).closest('div')!
+  expect(within(bar).getByRole('link', { name: 'Reconnect Gmail' })).toHaveAttribute('href', '/auth/gmail/connect')
+  expect(within(screen.getByRole('complementary')).getByRole('link', { name: 'Reconnect Gmail' })).toBeInTheDocument()
+})
+
 test('Team shows who has connected Gmail', async () => {
   api = stubApi({ gmail: 'connected' })
   renderAt('/team')

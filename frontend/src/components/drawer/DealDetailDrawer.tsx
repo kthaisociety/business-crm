@@ -35,8 +35,18 @@ type Props = {
 const activityIcons = { email: Mail, meeting: Users, note: StickyNote } satisfies Record<Activity['type'], unknown>
 const sourceLabels: Record<Activity['source'], string | null> = {
   manual: null,
-  email_sync: 'via email sync',
+  email_sync: 'via Gmail',
   fathom: 'via Fathom',
+}
+
+// A synced email's link opens it in the Gmail of the member whose mailbox it was found in, named in the
+// link: Gmail's ids are per mailbox, so it's no use to anyone else.
+function gmailOwner(url: string): string | null {
+  try {
+    return new URL(url).searchParams.get('authuser')?.toLowerCase() ?? null
+  } catch {
+    return null
+  }
 }
 
 const field =
@@ -371,8 +381,13 @@ export default function DealDetailDrawer({
                     </span>
                     <div className="flex items-baseline justify-between gap-2">
                       <p className="text-xs font-semibold text-gray-900">
+                        {activity.direction && (
+                          <span className="mr-1.5 rounded bg-gray-100 px-1 py-px text-[10px] font-medium text-gray-600">
+                            {activity.direction === 'sent' ? 'Sent' : 'Received'}
+                          </span>
+                        )}
                         {activity.title}
-                        {source && <span className="ml-1.5 font-normal text-gray-400">{source}</span>}
+                        {source && <span className="ml-1.5 font-normal text-gray-500">{source}</span>}
                       </p>
                       <time dateTime={activity.timestamp} className="shrink-0 text-[11px] text-gray-400">
                         {formatDate(activity.timestamp)}
@@ -386,17 +401,7 @@ export default function DealDetailDrawer({
                         ))}
                       </ul>
                     )}
-                    {/* Only https: a synced link is never a javascript: or other scheme. */}
-                    {activity.url?.startsWith('https://') && (
-                      <a
-                        href={activity.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-1 inline-block text-[11px] font-semibold text-indigo-700 hover:underline"
-                      >
-                        {activity.type === 'meeting' ? 'Open recording' : 'Open in Gmail'}
-                      </a>
-                    )}
+                    <OpenLink activity={activity} myEmail={members.find((m) => m.id === meId)?.email} members={members} />
                   </li>
                 )
               })}
@@ -406,4 +411,26 @@ export default function DealDetailDrawer({
       </aside>
     </div>
   )
+}
+
+// Where a synced entry links back to: the Fathom recording, or the email in Gmail for the member whose
+// mailbox it's in. Anyone else is told whose Gmail has it.
+function OpenLink({ activity, myEmail, members }: { activity: Activity; myEmail: string | undefined; members: Person[] }) {
+  // Only https: a synced link is never a javascript: or other scheme.
+  if (!activity.url?.startsWith('https://')) return null
+  const link = (label: string) => (
+    <a
+      href={activity.url}
+      target="_blank"
+      rel="noreferrer"
+      className="mt-1 inline-block text-[11px] font-semibold text-indigo-700 hover:underline"
+    >
+      {label}
+    </a>
+  )
+  if (activity.type !== 'email') return link('Open recording')
+  const owner = gmailOwner(activity.url)
+  if (!owner || owner === myEmail?.toLowerCase()) return link('Open in Gmail')
+  const name = members.find((m) => m.email.toLowerCase() === owner)?.name ?? owner
+  return <p className="mt-1 text-[11px] text-gray-500">In {name}’s Gmail</p>
 }

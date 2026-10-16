@@ -155,13 +155,16 @@ func (s *Store) RemoveMember(ctx context.Context, id string) error {
 		return ErrMemberNotFound
 	}
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var m Member
-		if err := tx.Where("id = ?", id).Take(&m).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-			return ErrMemberNotFound
-		} else if err != nil {
+		if err := keepAnAdmin(tx, id); err != nil {
 			return err
 		}
-		if err := keepAnAdmin(tx, id); err != nil {
+		// The member's row first, before anything that refers to them: whatever records on their behalf
+		// (a Gmail sync, ADR 0006) locks it first too, so the two take turns instead of deadlocking.
+		var m Member
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).Take(&m).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrMemberNotFound
+		} else if err != nil {
 			return err
 		}
 		var owned, supported, authored int64

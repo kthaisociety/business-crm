@@ -13,12 +13,14 @@ type Props = {
   outcome: string | null
   // Whether to ask the member to connect: they haven't yet, and haven't put it off this visit.
   ask: boolean
+  // Asking again: Google no longer honours their earlier grant.
+  reconnect?: boolean
   onLater: () => void
   onDismissOutcome: () => void
 }
 
 // The bar under the header: the last connect's outcome, or else the ask to connect.
-export default function GmailBar({ outcome, ask, onLater, onDismissOutcome }: Props) {
+export default function GmailBar({ outcome, ask, reconnect, onLater, onDismissOutcome }: Props) {
   const result = outcome ? (outcomes[outcome] ?? outcomes.failed) : null
   if (result) {
     return (
@@ -43,15 +45,16 @@ export default function GmailBar({ outcome, ask, onLater, onDismissOutcome }: Pr
     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-100 bg-indigo-50 px-4 py-2 text-xs text-indigo-900 md:px-6">
       <span className="flex items-center gap-2">
         <Mail size={14} aria-hidden />
-        Connect your Gmail so emails with contacts land on their deals on their own. Lucid only reads mail with a contact
-        on it.
+        {reconnect
+          ? 'Google stopped letting Lucid read your Gmail, so emails no longer land on deals. Connect it again.'
+          : 'Connect your Gmail so emails with contacts land on their deals on their own. Lucid only reads mail with a contact on it.'}
       </span>
       <span className="flex items-center gap-3">
         <button type="button" onClick={onLater} className="text-indigo-700 hover:underline">
           Later
         </button>
         <a href="/auth/gmail/connect" className="rounded-md bg-indigo-600 px-3 py-1 font-semibold text-white hover:bg-indigo-700">
-          Connect Gmail
+          {reconnect ? 'Reconnect Gmail' : 'Connect Gmail'}
         </a>
       </span>
     </div>
