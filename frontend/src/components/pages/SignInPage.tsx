@@ -30,7 +30,7 @@ export default function SignInPage({ reason }: { reason: string | null }) {
         >
           <LogIn size={16} aria-hidden /> Sign in with Google
         </a>
-        <p className="mt-6 text-center text-[11px] font-medium tracking-wide text-gray-400">by KTHAIS</p>
+        <p className="mt-6 text-center text-[11px] font-medium tracking-wide text-gray-500">by KTHAIS</p>
       </main>
     </div>
   )

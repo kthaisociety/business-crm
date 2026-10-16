@@ -40,7 +40,7 @@ export default function Sidebar({ user, userError, onSignOut }: Props) {
 
       <p
         title="Soon, emails with a contact and Fathom meeting notes will land on the deal's timeline on their own. Until then, add a quick note after each touchpoint: it resets the follow-up timer."
-        className="mt-auto flex items-center gap-1.5 px-2.5 pb-3 text-[11px] text-gray-400"
+        className="mt-auto flex items-center gap-1.5 px-2.5 pb-3 text-[11px] text-gray-500"
       >
         <Mail size={12} aria-hidden /> Email and meeting sync: coming soon
       </p>
@@ -62,7 +62,7 @@ export default function Sidebar({ user, userError, onSignOut }: Props) {
                 onClick={onSignOut}
                 aria-label="Sign out"
                 title="Sign out"
-                className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-900"
+                className="rounded-md p-1.5 text-gray-500 hover:bg-gray-100 hover:text-gray-900"
               >
                 <LogOut size={14} aria-hidden />
               </button>
