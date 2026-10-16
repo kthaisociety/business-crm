@@ -27,7 +27,7 @@ func TestASignInGivesUpOnAProviderThatStopsAnswering(t *testing.T) {
 
 	begun := httptest.NewRecorder()
 	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	resp, err := noFollow.Get(o.Begin(begun))
+	resp, err := noFollow.Get(o.Begin(begun, ""))
 	require.NoError(t, err)
 	resp.Body.Close()
 	back, err := url.Parse(resp.Header.Get("Location"))

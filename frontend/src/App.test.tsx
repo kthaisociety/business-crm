@@ -962,6 +962,67 @@ test('a Fathom meeting shows its summary, action items and a link to the recordi
   expect(within(meeting).getByRole('link', { name: 'Open recording' })).toHaveAttribute('href', 'https://fathom.video/share/made-up')
 })
 
+test('a member who hasn’t connected Gmail is asked to, until they put it off', async () => {
+  api = stubApi({ gmail: 'not-connected' })
+  await renderApp()
+
+  expect(within(screen.getByRole('complementary')).getByRole('link', { name: 'Connect Gmail' })).toBeInTheDocument()
+  const bar = screen.getByText(/Connect your Gmail/).closest('div')!
+  expect(within(bar).getByRole('link', { name: 'Connect Gmail' })).toHaveAttribute('href', '/auth/gmail/connect')
+
+  fireEvent.click(within(bar).getByRole('button', { name: 'Later' }))
+  expect(screen.queryByText(/Connect your Gmail/)).not.toBeInTheDocument()
+  expect(within(screen.getByRole('complementary')).getByRole('link', { name: 'Connect Gmail' })).toBeInTheDocument()
+})
+
+test('without Connect Gmail set up, nobody is asked', async () => {
+  await renderApp()
+
+  expect(screen.queryByText(/Connect your Gmail/)).not.toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: 'Connect Gmail' })).not.toBeInTheDocument()
+})
+
+test('coming back from Google says how connecting went, once', async () => {
+  api = stubApi({ gmail: 'connected' })
+  window.history.replaceState(null, '', '/?gmail=connected')
+  await renderApp()
+
+  expect(screen.getByRole('status')).toHaveTextContent('Gmail connected')
+  expect(window.location.search).toBe('')
+  fireEvent.click(within(screen.getByRole('status')).getByRole('button', { name: 'Dismiss' }))
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
+})
+
+test('connecting someone else’s mailbox is explained', async () => {
+  api = stubApi({ gmail: 'not-connected' })
+  window.history.replaceState(null, '', '/?gmail=wrong-account')
+  await renderApp()
+
+  expect(screen.getByRole('status')).toHaveTextContent('Connect the Gmail of the account you’re signed in with')
+  window.history.replaceState(null, '', '/')
+})
+
+test('a connected member can disconnect their Gmail', async () => {
+  api = stubApi({ gmail: 'connected' })
+  await renderApp()
+  const sidebar = screen.getByRole('complementary')
+  expect(sidebar).toHaveTextContent('Gmail connected')
+
+  fireEvent.click(within(sidebar).getByRole('button', { name: 'Disconnect' }))
+
+  expect(await within(sidebar).findByRole('link', { name: 'Connect Gmail' })).toBeInTheDocument()
+  expect(api.requests.some((r) => r.method === 'DELETE' && r.path === '/api/gmail')).toBe(true)
+})
+
+test('Team shows who has connected Gmail', async () => {
+  api = stubApi({ gmail: 'connected' })
+  renderAt('/team')
+
+  const me = (await within(await screen.findByRole('table')).findByText('Dev User')).closest('tr')!
+  expect(me).toHaveTextContent('Connected')
+  expect(screen.getByText('Iris Wallin').closest('tr')).toHaveTextContent('Not yet')
+})
+
 test('a role change the server refuses shows why', async () => {
   api.fail('PATCH', /^\/api\/members\//, 409, 'the team needs at least one admin')
   renderAt('/team')

@@ -117,6 +117,8 @@ type MemberView struct {
 	Name  string `json:"name"`
 	Email string `json:"email"`
 	Role  string `json:"role"`
+	// Whether they've connected their Gmail (docs/adr/0006); left out where Gmail is off.
+	GmailConnected *bool `json:"gmailConnected,omitempty"`
 }
 
 type CompanyView struct {

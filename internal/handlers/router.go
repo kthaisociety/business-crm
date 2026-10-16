@@ -13,6 +13,7 @@ import (
 
 	"github.com/kthaisociety/business-crm/internal/auth"
 	"github.com/kthaisociety/business-crm/internal/deals"
+	"github.com/kthaisociety/business-crm/internal/gmail"
 )
 
 type Deps struct {
@@ -28,6 +29,9 @@ type Deps struct {
 	Deals    *deals.Store
 	// FathomKey turns on /api/integrations/fathom (docs/adr/0006); nil leaves it off.
 	FathomKey []byte
+	// GmailOIDC and Gmail turn on Connect Gmail (docs/adr/0006), with real sign-in; nil leaves it off.
+	GmailOIDC *auth.OIDC
+	Gmail     *gmail.Connections
 }
 
 func NewRouter(d Deps) *gin.Engine {
@@ -43,14 +47,17 @@ func NewRouter(d Deps) *gin.Engine {
 		registerSignIn(r, d.OIDC, d.Sessions, d.Deals)
 	}
 	signedIn := api.Group("", signIn)
-	signedIn.GET("/me", me(d.Deals, d.Sessions != nil))
+	signedIn.GET("/me", me(d.Deals, d.Sessions != nil, d.Gmail))
 	signedIn.GET("/deals", listDeals(d.Deals))
 	signedIn.POST("/deals", createDeal(d.Deals))
 	signedIn.GET("/deals/:id", getDeal(d.Deals))
 	signedIn.PATCH("/deals/:id", updateDeal(d.Deals))
 	signedIn.POST("/deals/:id/notes", addNote(d.Deals))
 	registerCompanies(signedIn, d.Deals)
-	registerTeam(signedIn, d.Deals)
+	registerTeam(signedIn, d.Deals, d.Gmail)
+	if d.Gmail != nil && d.Sessions != nil {
+		registerGmail(r, signedIn, d.GmailOIDC, d.Sessions, d.Gmail)
+	}
 
 	if d.FathomKey != nil {
 		r.POST("/api/integrations/fathom", limitBody(maxWebhookBytes), fathomWebhook(d.FathomKey, d.Deals))
@@ -71,8 +78,8 @@ func health(pingDB func(ctx context.Context) error) gin.HandlerFunc {
 }
 
 // me is the signed-in user and, with a store, who they are on the team; canSignOut is false for the dev
-// user, who is always signed in.
-func me(store *deals.Store, canSignOut bool) gin.HandlerFunc {
+// user, who is always signed in. gmail is "off", "connected" or "not-connected" (docs/adr/0006).
+func me(store *deals.Store, canSignOut bool, conns *gmail.Connections) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := auth.Current(c)
 		if store == nil {
@@ -84,7 +91,16 @@ func me(store *deals.Store, canSignOut bool) gin.HandlerFunc {
 			fail(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"sub": user.Subject, "email": user.Email, "name": user.Name, "memberId": member.ID, "role": member.Role, "canSignOut": canSignOut})
+		mailbox := "off"
+		if conns != nil {
+			status, err := conns.Status(c.Request.Context(), member.ID)
+			if err != nil {
+				fail(c, err)
+				return
+			}
+			mailbox = map[bool]string{true: "connected", false: "not-connected"}[status.Connected]
+		}
+		c.JSON(http.StatusOK, gin.H{"sub": user.Subject, "email": user.Email, "name": user.Name, "memberId": member.ID, "role": member.Role, "canSignOut": canSignOut, "gmail": mailbox})
 	}
 }
 

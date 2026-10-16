@@ -30,6 +30,11 @@ type OIDCConfig struct {
 	// Google says so: its ID tokens carry `hd`, the Workspace domain, which must be Domain too, and its
 	// sign-in page can be limited to Domain's accounts.
 	Google bool
+	// ExtraScopes are asked for besides openid, email and profile, e.g. Gmail's (docs/adr/0006).
+	ExtraScopes []string
+	// Offline asks for a refresh token, so the app can act later without the person there. Google then
+	// always shows its consent screen.
+	Offline bool
 }
 
 // OIDC runs the authorization code flow with PKCE: Begin sends the browser to the provider, Finish takes
@@ -59,7 +64,7 @@ func NewOIDC(ctx context.Context, cfg OIDCConfig) (*OIDC, error) {
 			ClientSecret: cfg.ClientSecret,
 			Endpoint:     provider.Endpoint(),
 			RedirectURL:  cfg.RedirectURL,
-			Scopes:       []string{oidc.ScopeOpenID, "email", "profile"},
+			Scopes:       append([]string{oidc.ScopeOpenID, "email", "profile"}, cfg.ExtraScopes...),
 		},
 		verifier: provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
 		key:      mac.Sum(nil),
@@ -108,7 +113,8 @@ func flowCookieName(state string) string {
 }
 
 // Begin starts a sign-in: it sets the flow cookie and returns the provider's URL to send the browser to.
-func (o *OIDC) Begin(w http.ResponseWriter) string {
+// loginHint, if any, is the email the provider suggests.
+func (o *OIDC) Begin(w http.ResponseWriter, loginHint string) string {
 	f := flow{State: randomString(), Nonce: randomString(), Verifier: oauth2.GenerateVerifier(), Expires: time.Now().Add(flowTTL).Unix()}
 	payload, _ := json.Marshal(f)
 	value := base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(o.sign(payload))
@@ -119,42 +125,56 @@ func (o *OIDC) Begin(w http.ResponseWriter) string {
 		// Google offers only this domain's accounts, and lets someone with several pick one.
 		opts = append(opts, oauth2.SetAuthURLParam("hd", o.cfg.Domain), oauth2.SetAuthURLParam("prompt", "select_account"))
 	}
+	if o.cfg.Offline {
+		// A refresh token comes only with the consent screen.
+		opts = append(opts, oauth2.AccessTypeOffline, oauth2.SetAuthURLParam("prompt", "consent"))
+	}
+	if loginHint != "" {
+		opts = append(opts, oauth2.SetAuthURLParam("login_hint", loginHint))
+	}
 	return o.oauth.AuthCodeURL(f.State, opts...)
 }
 
 // Finish completes a sign-in from the provider's redirect back to this app, and clears the flow cookie.
 func (o *OIDC) Finish(w http.ResponseWriter, r *http.Request) (User, error) {
+	u, _, err := o.FinishWithToken(w, r)
+	return u, err
+}
+
+// FinishWithToken is Finish, also returning the provider's token: its refresh token, and the scopes the
+// person actually granted.
+func (o *OIDC) FinishWithToken(w http.ResponseWriter, r *http.Request) (User, *oauth2.Token, error) {
 	q := r.URL.Query()
 	name := flowCookieName(q.Get("state"))
 	http.SetCookie(w, o.cookie.clear(name))
 	f, err := o.readFlow(r, name)
 	if err != nil {
-		return User{}, &SignInError{ReasonFailed, err}
+		return User{}, nil, &SignInError{ReasonFailed, err}
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), providerTimeout)
 	defer cancel()
 	if e := q.Get("error"); e != "" {
-		return User{}, &SignInError{ReasonFailed, fmt.Errorf("provider: %s", e)}
+		return User{}, nil, &SignInError{ReasonFailed, fmt.Errorf("provider: %s", e)}
 	}
 	if subtle.ConstantTimeCompare([]byte(q.Get("state")), []byte(f.State)) != 1 {
-		return User{}, &SignInError{ReasonFailed, errors.New("state doesn't match")}
+		return User{}, nil, &SignInError{ReasonFailed, errors.New("state doesn't match")}
 	}
 
 	token, err := o.oauth.Exchange(ctx, q.Get("code"), oauth2.VerifierOption(f.Verifier))
 	if err != nil {
-		return User{}, &SignInError{ReasonFailed, fmt.Errorf("exchanging the code: %w", err)}
+		return User{}, nil, &SignInError{ReasonFailed, fmt.Errorf("exchanging the code: %w", err)}
 	}
 	raw, ok := token.Extra("id_token").(string)
 	if !ok {
-		return User{}, &SignInError{ReasonFailed, errors.New("no id_token in the token response")}
+		return User{}, nil, &SignInError{ReasonFailed, errors.New("no id_token in the token response")}
 	}
 	// Checks the signature, issuer, audience and expiry.
 	idToken, err := o.verifier.Verify(ctx, raw)
 	if err != nil {
-		return User{}, &SignInError{ReasonFailed, fmt.Errorf("verifying the id_token: %w", err)}
+		return User{}, nil, &SignInError{ReasonFailed, fmt.Errorf("verifying the id_token: %w", err)}
 	}
 	if subtle.ConstantTimeCompare([]byte(idToken.Nonce), []byte(f.Nonce)) != 1 {
-		return User{}, &SignInError{ReasonFailed, errors.New("nonce doesn't match")}
+		return User{}, nil, &SignInError{ReasonFailed, errors.New("nonce doesn't match")}
 	}
 	var claims struct {
 		Email         string `json:"email"`
@@ -163,19 +183,19 @@ func (o *OIDC) Finish(w http.ResponseWriter, r *http.Request) (User, error) {
 		HostedDomain  string `json:"hd"`
 	}
 	if err := idToken.Claims(&claims); err != nil {
-		return User{}, &SignInError{ReasonFailed, fmt.Errorf("reading claims: %w", err)}
+		return User{}, nil, &SignInError{ReasonFailed, fmt.Errorf("reading claims: %w", err)}
 	}
 	email := strings.ToLower(claims.Email)
 	domain := strings.ToLower(o.cfg.Domain)
 	switch {
 	case !claims.EmailVerified:
-		return User{}, &SignInError{ReasonDomain, fmt.Errorf("%s isn't verified", email)}
+		return User{}, nil, &SignInError{ReasonDomain, fmt.Errorf("%s isn't verified", email)}
 	case !strings.HasSuffix(email, "@"+domain):
-		return User{}, &SignInError{ReasonDomain, fmt.Errorf("%s isn't in %s", email, domain)}
+		return User{}, nil, &SignInError{ReasonDomain, fmt.Errorf("%s isn't in %s", email, domain)}
 	case o.cfg.Google && !strings.EqualFold(claims.HostedDomain, domain):
-		return User{}, &SignInError{ReasonDomain, fmt.Errorf("%s isn't a %s Workspace account", email, domain)}
+		return User{}, nil, &SignInError{ReasonDomain, fmt.Errorf("%s isn't a %s Workspace account", email, domain)}
 	}
-	return User{Subject: idToken.Subject, Email: email, Name: claims.Name}, nil
+	return User{Subject: idToken.Subject, Email: email, Name: claims.Name}, token, nil
 }
 
 func (o *OIDC) readFlow(r *http.Request, name string) (flow, error) {

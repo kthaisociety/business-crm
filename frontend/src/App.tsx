@@ -24,12 +24,14 @@ import {
   ApiError,
   SIGNED_OUT,
   signOut,
+  disconnectGmail,
   type DealPatch,
   type NewLeadInput,
   type User,
 } from './api'
 import DealDetailDrawer from './components/drawer/DealDetailDrawer'
 import NewLeadDialog from './components/drawer/NewLeadDialog'
+import GmailBar from './components/layout/GmailBar'
 import Header from './components/layout/Header'
 import Sidebar, { MobileNav } from './components/layout/Sidebar'
 import CompaniesPage, { type CompanyActions } from './components/pages/CompaniesPage'
@@ -89,6 +91,15 @@ export default function App() {
   const [userError, setUserError] = useState<string | null>(null)
   // No one is signed in, or the session ended: the sign-in page shows instead of the app.
   const [signedOut, setSignedOut] = useState(false)
+  // How the last Connect Gmail ended, read once from ?gmail= and then taken off the address.
+  const [gmailOutcome, setGmailOutcome] = useState(() => new URLSearchParams(window.location.search).get('gmail'))
+  const [gmailLater, setGmailLater] = useState(false)
+  useEffect(() => {
+    if (!gmailOutcome) return
+    const url = new URL(window.location.href)
+    url.searchParams.delete('gmail')
+    window.history.replaceState(null, '', url)
+  }, [gmailOutcome])
   const [data, setData] = useState<Data | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   // A save or refresh that failed, shown above the board; a failed refresh can be retried on its own.
@@ -373,6 +384,16 @@ export default function App() {
 
   if (signedOut) return <SignInPage reason={new URLSearchParams(window.location.search).get('sign-in')} />
 
+  const disconnect = async () => {
+    try {
+      await disconnectGmail()
+      setUser(await fetchMe())
+      await reload()
+    } catch (err) {
+      setNotice({ message: `Couldn't disconnect Gmail: ${messageOf(err)}` })
+    }
+  }
+
   const leave = async () => {
     try {
       await signOut()
@@ -398,8 +419,14 @@ export default function App() {
         onNewLead={() => setAddingLead(true)}
       />
       <MobileNav user={user} onSignOut={() => void leave()} />
+      <GmailBar
+        outcome={gmailOutcome}
+        ask={user?.gmail === 'not-connected' && !gmailLater}
+        onLater={() => setGmailLater(true)}
+        onDismissOutcome={() => setGmailOutcome(null)}
+      />
       <div className="flex min-h-0 flex-1">
-        <Sidebar user={user} userError={userError} onSignOut={() => void leave()} />
+        <Sidebar user={user} userError={userError} onSignOut={() => void leave()} onDisconnectGmail={() => void disconnect()} />
         <main className="flex min-w-0 flex-1 flex-col">
           {notice && (
             <p role="alert" className="mx-6 mt-4 flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">

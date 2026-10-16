@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -36,6 +38,9 @@ type Claims struct {
 	Audience string
 	// Nonce overrides the one the app sent, to test a token from another sign-in.
 	Nonce string
+	// Withheld scopes are left out of what's granted, as when someone unticks one on Google's consent
+	// screen.
+	Withheld []string
 }
 
 type Provider struct {
@@ -48,12 +53,15 @@ type Provider struct {
 	codes   map[string]grant
 	stalled bool
 	stop    chan struct{} // closed when the test ends, releasing stalled requests
+	// LastAuthorize is the query of the latest authorize request, to check what the app asked for.
+	LastAuthorize url.Values
 }
 
 type grant struct {
 	claims    Claims
 	nonce     string
 	challenge string
+	scope     string
 }
 
 func NewProvider(t *testing.T) *Provider {
@@ -111,7 +119,8 @@ func (p *Provider) authorize(w http.ResponseWriter, r *http.Request) {
 	}
 	code := rand.Text()
 	p.mu.Lock()
-	p.codes[code] = grant{claims: p.next, nonce: q.Get("nonce"), challenge: q.Get("code_challenge")}
+	p.codes[code] = grant{claims: p.next, nonce: q.Get("nonce"), challenge: q.Get("code_challenge"), scope: q.Get("scope")}
+	p.LastAuthorize = q
 	p.mu.Unlock()
 	back, _ := url.Parse(q.Get("redirect_uri"))
 	back.RawQuery = url.Values{"code": {code}, "state": {q.Get("state")}}.Encode()
@@ -144,7 +153,16 @@ func (p *Provider) token(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"error":"invalid_grant"}`))
 		return
 	}
-	writeJSON(w, map[string]any{"access_token": "test", "token_type": "Bearer", "expires_in": 3600, "id_token": p.idToken(g)})
+	var granted []string
+	for _, s := range strings.Fields(g.scope) {
+		if !slices.Contains(g.claims.Withheld, s) {
+			granted = append(granted, s)
+		}
+	}
+	writeJSON(w, map[string]any{
+		"access_token": "test", "token_type": "Bearer", "expires_in": 3600, "id_token": p.idToken(g),
+		"refresh_token": "refresh-" + g.claims.Subject, "scope": strings.Join(granted, " "),
+	})
 }
 
 func (p *Provider) idToken(g grant) string {

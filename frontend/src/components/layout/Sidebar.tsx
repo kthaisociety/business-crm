@@ -8,6 +8,7 @@ type Props = {
   user: User | null
   userError: string | null
   onSignOut: () => void
+  onDisconnectGmail: () => void
 }
 
 const pages = [
@@ -26,7 +27,7 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
     isActive ? 'bg-gray-100 font-semibold text-gray-900' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
   }`
 
-export default function Sidebar({ user, userError, onSignOut }: Props) {
+export default function Sidebar({ user, userError, onSignOut, onDisconnectGmail }: Props) {
   return (
     <aside className="hidden w-56 shrink-0 flex-col border-r border-gray-200 bg-white p-3 md:flex">
       <nav aria-label="Main" className="flex flex-col gap-0.5">
@@ -38,12 +39,17 @@ export default function Sidebar({ user, userError, onSignOut }: Props) {
         ))}
       </nav>
 
-      <p
-        title="Soon, emails with a contact and Fathom meeting notes will land on the deal's timeline on their own. Until then, add a quick note after each touchpoint: it resets the follow-up timer."
-        className="mt-auto flex items-center gap-1.5 px-2.5 pb-3 text-[11px] text-gray-500"
-      >
-        <Mail size={12} aria-hidden /> Email and meeting sync: coming soon
-      </p>
+      {/* Where Connect Gmail is on, the user chip below says where it stands instead. */}
+      <div className="mt-auto">
+        {(!user?.gmail || user.gmail === 'off') && (
+          <p
+            title="Soon, emails with a contact will land on the deal's timeline on their own. Until then, add a quick note after each touchpoint: it resets the follow-up timer."
+            className="flex items-center gap-1.5 px-2.5 pb-3 text-[11px] text-gray-500"
+          >
+            <Mail size={12} aria-hidden /> Email sync: coming soon
+          </p>
+        )}
+      </div>
 
       <div className="border-t border-gray-100 pt-3 text-[11px] text-gray-500">
         {user && (
@@ -73,6 +79,19 @@ export default function Sidebar({ user, userError, onSignOut }: Props) {
           <span className="mt-2 inline-block rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600 capitalize">
             {user.role}
           </span>
+        )}
+        {user?.gmail === 'connected' && (
+          <p className="mt-2 flex items-center gap-1.5">
+            <Mail size={12} aria-hidden /> Gmail connected
+            <button type="button" onClick={onDisconnectGmail} className="ml-auto text-gray-500 hover:text-red-600">
+              Disconnect
+            </button>
+          </p>
+        )}
+        {user?.gmail === 'not-connected' && (
+          <a href="/auth/gmail/connect" className="mt-2 flex items-center gap-1.5 text-indigo-700 hover:underline">
+            <Mail size={12} aria-hidden /> Connect Gmail
+          </a>
         )}
         {userError && <p className="text-red-600">{userError}</p>}
         {!user && !userError && <p>Loading…</p>}

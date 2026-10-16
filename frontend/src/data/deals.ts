@@ -52,7 +52,8 @@ export const ROLES: { id: Role; label: string }[] = [
 export const canSeeReports = (role: Role | undefined) => role === 'admin' || role === 'board'
 
 // A business-team member: a deal's owner or support, or someone on the Team page.
-export type Person = { id: string; name: string; email: string; role?: Role }
+// gmailConnected is there only where Connect Gmail is on (docs/adr/0006).
+export type Person = { id: string; name: string; email: string; role?: Role; gmailConnected?: boolean }
 
 export type Company = { id: string; name: string; website: string; notes: string }
 

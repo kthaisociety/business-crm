@@ -9,6 +9,8 @@ import (
 
 	"github.com/kthaisociety/business-crm/internal/auth"
 	"github.com/kthaisociety/business-crm/internal/fathom"
+	"github.com/kthaisociety/business-crm/internal/gmail"
+	"github.com/kthaisociety/business-crm/internal/secretbox"
 )
 
 type Config struct {
@@ -36,6 +38,14 @@ type Config struct {
 	// FathomWebhookSecret checks that meetings posted to /api/integrations/fathom come from the team's
 	// Fathom webhook (docs/adr/0006): `whsec_` and base64, as Fathom shows it. Unset, the route is off.
 	FathomWebhookSecret string
+
+	// TokenEncryptionKey seals members' Gmail refresh tokens (docs/adr/0006): 32 random bytes in base64.
+	// Setting it turns on Connect Gmail, which needs real sign-in. The Gmail client defaults to the
+	// sign-in client while that's Google's; GMAIL_CLIENT_ID and _SECRET set it apart for when sign-in
+	// moves to identity-service.
+	TokenEncryptionKey string
+	GmailClientID      string
+	GmailClientSecret  string
 }
 
 func Load() *Config {
@@ -52,8 +62,39 @@ func Load() *Config {
 		SignInDomain:     strings.TrimSpace(getEnv("SIGN_IN_DOMAIN", "kthais.com")),
 
 		FathomWebhookSecret: strings.TrimSpace(getEnv("FATHOM_WEBHOOK_SECRET", "")),
+
+		TokenEncryptionKey: strings.TrimSpace(getEnv("TOKEN_ENCRYPTION_KEY", "")),
+		GmailClientID:      strings.TrimSpace(getEnv("GMAIL_CLIENT_ID", "")),
+		GmailClientSecret:  strings.TrimSpace(getEnv("GMAIL_CLIENT_SECRET", "")),
 	}
 }
+
+// Gmail is Connect Gmail's settings (docs/adr/0006), or nil when it's off: a Google client asking for
+// Gmail, offline, with its own callback.
+func (c *Config) Gmail() *auth.OIDCConfig {
+	if c.TokenEncryptionKey == "" {
+		return nil
+	}
+	id, secret := c.GmailClientID, c.GmailClientSecret
+	if id == "" && secret == "" && c.OIDCIssuer == googleIssuer {
+		id, secret = c.OIDCClientID, c.OIDCClientSecret
+	}
+	if id == "" || secret == "" {
+		return nil
+	}
+	return &auth.OIDCConfig{
+		Issuer:       googleIssuer,
+		ClientID:     id,
+		ClientSecret: secret,
+		RedirectURL:  c.PublicURL + "/auth/gmail/callback",
+		Domain:       c.SignInDomain,
+		Google:       true,
+		ExtraScopes:  []string{gmail.Scope},
+		Offline:      true,
+	}
+}
+
+const googleIssuer = "https://accounts.google.com"
 
 // OIDC is the real sign-in's settings, or nil when no client is configured and the dev user (if any)
 // signs requests in instead.
@@ -67,7 +108,7 @@ func (c *Config) OIDC() *auth.OIDCConfig {
 		ClientSecret: c.OIDCClientSecret,
 		RedirectURL:  c.PublicURL + "/auth/callback",
 		Domain:       c.SignInDomain,
-		Google:       c.OIDCIssuer == "https://accounts.google.com",
+		Google:       c.OIDCIssuer == googleIssuer,
 	}
 }
 
@@ -109,6 +150,17 @@ func (c *Config) Validate() error {
 	if c.FathomWebhookSecret != "" {
 		if _, err := fathom.Key(c.FathomWebhookSecret); err != nil {
 			return fmt.Errorf("FATHOM_WEBHOOK_SECRET: %w", err)
+		}
+	}
+	if c.TokenEncryptionKey != "" {
+		if _, err := secretbox.New(c.TokenEncryptionKey); err != nil {
+			return fmt.Errorf("TOKEN_ENCRYPTION_KEY: %w", err)
+		}
+		if c.OIDC() == nil {
+			return fmt.Errorf("Connect Gmail (TOKEN_ENCRYPTION_KEY) needs real sign-in: set the OIDC client too")
+		}
+		if c.Gmail() == nil {
+			return fmt.Errorf("Connect Gmail needs a Google client: set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET")
 		}
 	}
 	if c.OIDC() != nil && c.DevUserEmail != "" {

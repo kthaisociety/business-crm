@@ -23,6 +23,7 @@ the API under `/api` and an embedded Vite + React frontend everywhere else.
   `auth/authtest` is a fake OIDC provider for tests
 - `internal/deals`: the deal log: GORM models, validation and queries; `Record` puts synced emails and meetings on deals
 - `internal/fathom`: Fathom's meeting webhook: signature and payload (ADR 0006)
+- `internal/gmail`: members' connected Gmail mailboxes (ADR 0006); `internal/secretbox` seals their tokens
 - `internal/handlers`: `/api` routes, and the frontend for every other path
 - `internal/database`: Postgres connection and migrations (`migrations/*.sql`, applied at startup)
 - `frontend/`: the frontend (Vite, React, TypeScript, Tailwind); `frontend/embed.go` embeds `frontend/dist`

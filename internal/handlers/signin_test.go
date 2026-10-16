@@ -85,8 +85,15 @@ func (b *browser) do(method, target string) *httptest.ResponseRecorder {
 // at the end.
 func (b *browser) signIn(who authtest.Claims) string {
 	b.t.Helper()
+	return b.through("/auth/login", "/auth/callback", who)
+}
+
+// through goes from start, via the provider signing this person in, back to the app's callback, and
+// returns where the app sends the browser at the end.
+func (b *browser) through(start, callback string, who authtest.Claims) string {
+	b.t.Helper()
 	b.app.provider.SignsIn(who)
-	w := b.do(http.MethodGet, "/auth/login")
+	w := b.do(http.MethodGet, start)
 	require.Equal(b.t, http.StatusFound, w.Code)
 
 	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -96,7 +103,7 @@ func (b *browser) signIn(who authtest.Claims) string {
 	require.Equal(b.t, http.StatusFound, resp.StatusCode)
 	back, err := url.Parse(resp.Header.Get("Location"))
 	require.NoError(b.t, err)
-	require.Equal(b.t, "/auth/callback", back.Path)
+	require.Equal(b.t, callback, back.Path)
 
 	w = b.do(http.MethodGet, back.RequestURI())
 	require.Equal(b.t, http.StatusFound, w.Code)

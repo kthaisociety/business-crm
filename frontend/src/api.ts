@@ -12,6 +12,8 @@ export type User = {
   role?: Role
   // False for the dev user, who is always signed in (docs/pcr/0007).
   canSignOut?: boolean
+  // Their mailbox (docs/adr/0006): off where Connect Gmail isn't set up.
+  gmail?: 'off' | 'connected' | 'not-connected'
 }
 
 // Fired when the server answers 401: the session ended, so the app shows the sign-in page.
@@ -54,6 +56,9 @@ export async function fetchMe(signal?: AbortSignal): Promise<User> {
   }
   return res.json()
 }
+
+// Forgets your mailbox and withdraws the CRM's access to it (docs/adr/0006).
+export const disconnectGmail = () => call<void>('DELETE', '/api/gmail')
 
 // Ends this browser's session (docs/adr/0004).
 export const signOut = () => call<void>('POST', '/auth/logout')
