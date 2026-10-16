@@ -52,6 +52,17 @@ func listDeals(store *deals.Store) gin.HandlerFunc {
 	}
 }
 
+func getDeal(store *deals.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		deal, err := store.Get(c.Request.Context(), c.Param("id"))
+		if err != nil {
+			fail(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, deal)
+	}
+}
+
 func createDeal(store *deals.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		body, ok := readBody(c)
@@ -112,17 +123,22 @@ func addNote(store *deals.Store) gin.HandlerFunc {
 	}
 }
 
-// fail answers 400 with the reason for a bad request, 409 for one that clashes with what's stored, 404
+// fail answers 400 with the reason for a bad request, 403 for one the member's role doesn't allow, 409 for
+// one that clashes with what's stored, 404
 // for an unknown deal, company or contact, and 500 for anything else, which is logged rather than shown.
 func fail(c *gin.Context, err error) {
 	var invalid *deals.ValidationError
 	var clash *deals.ConflictError
+	var forbidden *deals.ForbiddenError
 	switch {
+	case errors.As(err, &forbidden):
+		c.JSON(http.StatusForbidden, gin.H{"error": forbidden.Error()})
 	case errors.As(err, &invalid):
 		c.JSON(http.StatusBadRequest, gin.H{"error": invalid.Error()})
 	case errors.As(err, &clash):
 		c.JSON(http.StatusConflict, gin.H{"error": clash.Error()})
-	case errors.Is(err, deals.ErrNotFound), errors.Is(err, deals.ErrCompanyNotFound), errors.Is(err, deals.ErrContactNotFound):
+	case errors.Is(err, deals.ErrNotFound), errors.Is(err, deals.ErrCompanyNotFound), errors.Is(err, deals.ErrContactNotFound),
+		errors.Is(err, deals.ErrMemberNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	default:
 		log.Printf("%s %s: %v", c.Request.Method, c.Request.URL.Path, err)

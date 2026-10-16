@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"slices"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -17,11 +19,12 @@ var ErrNotFound = errors.New("deal not found")
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 type Store struct {
-	db *gorm.DB
+	db     *gorm.DB
+	admins []string // emails made admins when they sign in (docs/adr/0003)
 }
 
-func NewStore(db *gorm.DB) *Store {
-	return &Store{db: db}
+func NewStore(db *gorm.DB, adminEmails ...string) *Store {
+	return &Store{db: db, admins: adminEmails}
 }
 
 // withEverything loads a deal's company, contact, owner, support and timeline (oldest first) along with it.
@@ -63,8 +66,8 @@ func get(db *gorm.DB, id string) (View, error) {
 	return viewOf(d), nil
 }
 
-// Create adds a lead owned by whoever adds it, with an "Added as a lead" entry on its timeline. A new
-// company or contact given by name is added along with it.
+// Create adds a lead, with an "Added as a lead" entry by whoever adds it on its timeline. The lead is
+// owned by lead.OwnerID, or by no one yet. A new company or contact given by name is added along with it.
 func (s *Store) Create(ctx context.Context, lead NewLead, by auth.User) (View, error) {
 	if err := lead.validate(); err != nil {
 		return View{}, err
@@ -75,9 +78,14 @@ func (s *Store) Create(ctx context.Context, lead NewLead, by auth.User) (View, e
 	}
 	var view View
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		owner, err := memberFor(tx, by)
+		author, err := s.memberFor(tx, by)
 		if err != nil {
 			return err
+		}
+		if lead.OwnerID != nil {
+			if err := memberExists(tx, *lead.OwnerID); err != nil {
+				return err
+			}
 		}
 		var company Company
 		if lead.CompanyID != "" {
@@ -111,7 +119,7 @@ func (s *Store) Create(ctx context.Context, lead NewLead, by auth.User) (View, e
 			Audience:  "Unclear",
 			Semester:  lead.Semester,
 			Status:    "lead",
-			OwnerID:   &owner.ID,
+			OwnerID:   lead.OwnerID,
 			NextStep:  lead.NextStep,
 		}
 		if err := tx.Omit(clause.Associations).Create(&d).Error; isForeignKeyViolation(err) {
@@ -123,7 +131,7 @@ func (s *Store) Create(ctx context.Context, lead NewLead, by auth.User) (View, e
 			DealID:       d.ID,
 			Type:         "note",
 			Source:       "manual",
-			AuthorID:     &owner.ID,
+			AuthorID:     &author.ID,
 			Title:        "Added as a lead",
 			BulletPoints: []string{},
 			OccurredAt:   time.Now(),
@@ -143,6 +151,11 @@ func (s *Store) Update(ctx context.Context, id string, cols map[string]any) (Vie
 	}
 	var view View
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if ownerID, ok := cols["owner_id"].(string); ok {
+			if err := memberExists(tx, ownerID); err != nil {
+				return err
+			}
+		}
 		if contactID, ok := cols["contact_id"].(string); ok {
 			var d Deal
 			if err := tx.Preload("Company").Where("id = ?", id).Take(&d).Error; errors.Is(err, gorm.ErrRecordNotFound) {
@@ -186,7 +199,7 @@ func (s *Store) AddNote(ctx context.Context, dealID, text string, by auth.User) 
 		if exists == 0 {
 			return ErrNotFound
 		}
-		author, err := memberFor(tx, by)
+		author, err := s.memberFor(tx, by)
 		if err != nil {
 			return err
 		}
@@ -222,16 +235,42 @@ func contactAt(tx *gorm.DB, id string, company Company) (Contact, error) {
 	return c, err
 }
 
-// memberFor finds the signed-in user's member row, adding it the first time they change anything.
-func memberFor(tx *gorm.DB, u auth.User) (Member, error) {
+// memberFor finds the signed-in user's member row, adding it as a member the first time they sign in,
+// and makes them an admin if ADMIN_EMAILS names them.
+func (s *Store) memberFor(tx *gorm.DB, u auth.User) (Member, error) {
 	name := u.Name
 	if name == "" {
 		name = u.Email
 	}
-	m := Member{Email: u.Email, Name: name}
+	m := Member{Email: strings.ToLower(u.Email), Name: name}
 	err := tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "email"}},
 		DoUpdates: clause.AssignmentColumns([]string{"name"}),
 	}).Create(&m).Error
+	if err != nil {
+		return m, err
+	}
+	// The upsert's RETURNING gives the id; the role may predate this sign-in.
+	if err := tx.Where("id = ?", m.ID).Take(&m).Error; err != nil {
+		return m, err
+	}
+	if m.Role != "admin" && slices.ContainsFunc(s.admins, func(e string) bool { return strings.EqualFold(e, u.Email) }) {
+		m.Role = "admin"
+		err = tx.Model(&m).Update("role", "admin").Error
+	}
 	return m, err
+}
+
+func memberExists(tx *gorm.DB, id string) error {
+	var n int64
+	if !uuidPattern.MatchString(id) {
+		return invalid("ownerId is not a team member")
+	}
+	if err := tx.Model(&Member{}).Where("id = ?", id).Count(&n).Error; err != nil {
+		return err
+	}
+	if n == 0 {
+		return invalid("ownerId is not a team member")
+	}
+	return nil
 }

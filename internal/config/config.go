@@ -23,6 +23,9 @@ type Config struct {
 	// DevUserEmail, when set, signs every request in as this user (docs/pcr/0005). Unset, the API refuses
 	// every request but health. Never set in production.
 	DevUserEmail string
+
+	// AdminEmails become admins when they sign in (docs/adr/0003), so a new environment has an admin.
+	AdminEmails []string
 }
 
 func Load() *Config {
@@ -31,6 +34,7 @@ func Load() *Config {
 		Port:         getEnv("PORT", "8000"),
 		DatabaseURL:  getEnv("DATABASE_URL", ""),
 		DevUserEmail: strings.TrimSpace(getEnv("DEV_USER_EMAIL", "")),
+		AdminEmails:  splitList(getEnv("ADMIN_EMAILS", "")),
 	}
 }
 
@@ -57,6 +61,17 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("missing required environment variables: %s", strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+// splitList reads a comma-separated list, dropping blanks.
+func splitList(s string) []string {
+	var items []string
+	for _, item := range strings.Split(s, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
 }
 
 func getEnv(key, fallback string) string {

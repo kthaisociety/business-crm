@@ -49,9 +49,9 @@ func main() {
 func seed(tx *gorm.DB) error {
 	members := map[string]*deals.Member{}
 	for _, m := range []deals.Member{
-		{Email: "alva.lindqvist@example.com", Name: "Alva Lindqvist"},
-		{Email: "oskar.berg@example.com", Name: "Oskar Berg"},
-		{Email: "maja.holm@example.com", Name: "Maja Holm"},
+		{Email: "alva.lindqvist@example.com", Name: "Alva Lindqvist", Role: "admin"},
+		{Email: "oskar.berg@example.com", Name: "Oskar Berg", Role: "board"},
+		{Email: "maja.holm@example.com", Name: "Maja Holm", Role: "board"},
 		{Email: "noah.ek@example.com", Name: "Noah Ek"},
 		{Email: "iris.wallin@example.com", Name: "Iris Wallin"},
 	} {
@@ -78,7 +78,9 @@ func seed(tx *gorm.DB) error {
 			}
 			d.ContactID = &contact.ID
 		}
-		d.OwnerID = &members[s.owner].ID
+		if s.owner != "" {
+			d.OwnerID = &members[s.owner].ID
+		}
 		for _, name := range s.support {
 			d.Support = append(d.Support, *members[name])
 		}
@@ -103,7 +105,7 @@ type seedDeal struct {
 	company string
 	contact *deals.ContactInput
 	deal    deals.Deal
-	owner   string
+	owner   string // empty: no one has claimed it yet
 	support []string
 }
 
@@ -161,7 +163,7 @@ func seedDeals() []seedDeal {
 			Notes:      "Thesis and part-time AI roles in insurance.",
 			Activities: []deals.Activity{{Title: "Replied to their questions", OccurredAt: ago(1)}},
 		}},
-		{company: "Stadsnät Labs", contact: &deals.ContactInput{Name: "Sara Kvist", Email: "sara.kvist@example.com", Role: "Innovation Manager"}, owner: "Oskar Berg", deal: deals.Deal{
+		{company: "Stadsnät Labs", contact: &deals.ContactInput{Name: "Sara Kvist", Email: "sara.kvist@example.com", Role: "Innovation Manager"}, deal: deals.Deal{
 			DealType: "Partnership", EventType: "TBA", Audience: "Unclear",
 			Semester: "HT 2026", Status: "lead",
 			NextStep: "Await reply to follow-up email",

@@ -6,6 +6,7 @@ import DealTable from './list/DealTable'
 
 type Props = {
   deals: Deal[]
+  meId: string | undefined
   onSelect: (id: string) => void
   onMove: (id: string, status: Status) => void
 }
@@ -15,16 +16,18 @@ const chip = (active: boolean) =>
     active ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
   }`
 
-export default function PipelineView({ deals, onSelect, onMove }: Props) {
+export default function PipelineView({ deals, meId, onSelect, onMove }: Props) {
   const [view, setView] = useState<'board' | 'list'>('board')
   const [dealType, setDealType] = useState<DealType | 'all'>('all')
   const [followUpOnly, setFollowUpOnly] = useState(false)
+  const [owner, setOwner] = useState<'anyone' | 'mine' | 'unassigned'>('anyone')
   const [showCanceled, setShowCanceled] = useState(false)
 
   const visible = deals.filter(
     (deal) =>
       (dealType === 'all' || deal.dealType === dealType) &&
       (!followUpOnly || nudgeFor(deal) !== null) &&
+      (owner === 'anyone' || (owner === 'mine' ? deal.owner?.id === meId : deal.owner === null)) &&
       (showCanceled || deal.status !== 'canceled'),
   )
 
@@ -57,6 +60,24 @@ export default function PipelineView({ deals, onSelect, onMove }: Props) {
           </button>
         ))}
         <span className="mx-1.5 h-4 w-px bg-gray-200" />
+        {meId && (
+          <button
+            type="button"
+            aria-pressed={owner === 'mine'}
+            onClick={() => setOwner(owner === 'mine' ? 'anyone' : 'mine')}
+            className={chip(owner === 'mine')}
+          >
+            Mine
+          </button>
+        )}
+        <button
+          type="button"
+          aria-pressed={owner === 'unassigned'}
+          onClick={() => setOwner(owner === 'unassigned' ? 'anyone' : 'unassigned')}
+          className={chip(owner === 'unassigned')}
+        >
+          Unassigned
+        </button>
         <button type="button" aria-pressed={followUpOnly} onClick={() => setFollowUpOnly((on) => !on)} className={chip(followUpOnly)}>
           Needs follow-up
         </button>

@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kthaisociety/business-crm/internal/auth"
 	"github.com/kthaisociety/business-crm/internal/deals"
 )
 
@@ -80,4 +81,25 @@ func registerCompanies(r *gin.RouterGroup, store *deals.Store) {
 	r.POST("/contacts", create(store.CreateContact))
 	r.PATCH("/contacts/:id", patch(deals.ParseContactPatch, store.UpdateContact))
 	r.DELETE("/contacts/:id", remove(store.DeleteContact))
+}
+
+// adminOnly lets only admins through (docs/adr/0003).
+func adminOnly(store *deals.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if err := store.RequireAdmin(c.Request.Context(), auth.Current(c)); err != nil {
+			fail(c, err)
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// The team: everyone sees it; admins change it.
+func registerTeam(r *gin.RouterGroup, store *deals.Store) {
+	r.GET("/members", list(store.ListMembers))
+	admin := r.Group("", adminOnly(store))
+	admin.POST("/members", create(store.AddMember))
+	admin.PATCH("/members/:id", patch(deals.ParseMemberPatch, store.UpdateMember))
+	admin.DELETE("/members/:id", remove(store.RemoveMember))
 }

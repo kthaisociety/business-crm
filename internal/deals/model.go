@@ -33,6 +33,7 @@ type Member struct {
 	ID        string `gorm:"type:uuid;default:gen_random_uuid()"`
 	Email     string
 	Name      string
+	Role      string `gorm:"default:member"`
 	CreatedAt time.Time
 }
 
@@ -114,6 +115,7 @@ type MemberView struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	Email string `json:"email"`
+	Role  string `json:"role"`
 }
 
 type CompanyView struct {
@@ -183,7 +185,7 @@ func viewOfContact(c Contact) ContactView {
 }
 
 func viewOfMember(m Member) MemberView {
-	return MemberView{ID: m.ID, Name: m.Name, Email: m.Email}
+	return MemberView{ID: m.ID, Name: m.Name, Email: m.Email, Role: m.Role}
 }
 
 func viewOfActivity(a Activity) ActivityView {

@@ -10,8 +10,13 @@ import {
   deleteContact,
   fetchCompanies,
   fetchContacts,
+  fetchDeal,
   fetchDeals,
   fetchMe,
+  fetchMembers,
+  addMember,
+  removeMember,
+  updateMember,
   updateCompany,
   updateContact,
   updateDeal,
@@ -26,8 +31,20 @@ import Sidebar, { MobileNav } from './components/layout/Sidebar'
 import CompaniesPage, { type CompanyActions } from './components/pages/CompaniesPage'
 import ContactsPage, { type ContactActions } from './components/pages/ContactsPage'
 import ReportsPage from './components/pages/ReportsPage'
+import TeamPage, { type TeamActions } from './components/pages/TeamPage'
 import PipelineView from './components/PipelineView'
-import { compareSemesters, currentSemester, isConfirmed, isOpen, isUnpaid, type Company, type Contact, type Deal } from './data/deals'
+import {
+  compareSemesters,
+  currentSemester,
+  isConfirmed,
+  isOpen,
+  isUnpaid,
+  type Company,
+  type Contact,
+  type Deal,
+  type Person,
+  canSeeReports,
+} from './data/deals'
 import { messageOf } from './format'
 import { LocalEdits } from './dealSync'
 import { useMinuteTick } from './hooks'
@@ -49,11 +66,16 @@ function matches(deal: Deal, query: string): boolean {
 
 const sumFees = (deals: Deal[]) => deals.reduce((sum, deal) => sum + (deal.feeSEK ?? 0), 0)
 
-type Data = { deals: Deal[]; companies: Company[]; contacts: Contact[] }
+type Data = { deals: Deal[]; companies: Company[]; contacts: Contact[]; members: Person[] }
 
 const fetchAll = async (signal?: AbortSignal): Promise<Data> => {
-  const [deals, companies, contacts] = await Promise.all([fetchDeals(signal), fetchCompanies(signal), fetchContacts(signal)])
-  return { deals, companies, contacts }
+  const [deals, companies, contacts, members] = await Promise.all([
+    fetchDeals(signal),
+    fetchCompanies(signal),
+    fetchContacts(signal),
+    fetchMembers(signal),
+  ])
+  return { deals, companies, contacts, members }
 }
 
 export default function App() {
@@ -80,6 +102,24 @@ export default function App() {
     return () => controller.abort()
   }, [])
 
+  // Reloads of everything, numbered: only the latest one's answer applies.
+  const reloads = useRef(0)
+
+  // Signing in adds you to the team. A team list that arrived before that finished lacks you: fetch it again.
+  const missingMe = !!user?.memberId && !!data && !data.members.some((m) => m.id === user.memberId)
+  useEffect(() => {
+    if (!missingMe) return
+    const ticket = reloads.current
+    fetchMembers()
+      .then((members) => {
+        // A reload started since brings a newer list.
+        if (ticket === reloads.current) setData((d) => d && { ...d, members })
+      })
+      .catch(() => {
+        // The next refresh brings the team up to date.
+      })
+  }, [missingMe])
+
   // The server's latest version of each deal: a field whose save fails goes back to it.
   const serverDeals = useRef(new Map<string, Deal>())
   const remember = (deals: Deal[]) => {
@@ -90,9 +130,13 @@ export default function App() {
   // Requests for deals, numbered as they go out, and per deal the newest one whose answer was applied, so
   // an answer that was overtaken by a newer one can't bring back older shared details.
   const requests = useRef({ count: 0, applied: new Map<string, number>() })
+  // Deals whose server version is unknown, because a save was overtaken and reading the deal again failed,
+  // with the number of the last request out then: any answer to a later request is up to date.
+  const unsure = useRef(new Map<string, number>())
   const applied = (deals: Deal[], request: number) => {
     for (const deal of deals) {
       requests.current.applied.set(deal.id, Math.max(request, requests.current.applied.get(deal.id) ?? 0))
+      if (request > (unsure.current.get(deal.id) ?? Infinity)) unsure.current.delete(deal.id)
     }
   }
 
@@ -119,7 +163,6 @@ export default function App() {
   // Saves to one deal go out one at a time, in the order they were made, so the server ends up with the
   // last edit.
   const saveQueue = useRef(new Map<string, Promise<void>>())
-  const reloads = useRef(0)
 
   // After a change that shows in more than one place (a company's name is on its deals, a new lead may
   // add a company and contact), everything reloads. Only the latest reload applies, and in each deal it
@@ -144,11 +187,33 @@ export default function App() {
   const all = data?.deals ?? []
   const companies = data?.companies ?? []
   const contacts = data?.contacts ?? []
+  const members = data?.members ?? []
+  const isAdmin = user?.role === 'admin'
   // The current semester is always offered, even before it has deals.
   const semesters = [...new Set([currentSemester(), ...all.map((deal) => deal.semester)])].sort(compareSemesters)
 
   const replaceDeal = (id: string, change: (deal: Deal) => Deal) =>
     setData((d) => d && { ...d, deals: d.deals.map((deal) => (deal.id === id ? change(deal) : deal)) })
+
+  // Reads one deal again and applies it, unless a newer answer for it has been applied meanwhile. If
+  // that fails, the deal's server version is unknown until an answer asked for later arrives, and the
+  // notice offers to read it again. Resolves to whether the read worked.
+  const refreshDeal = async (id: string, company: string): Promise<boolean> => {
+    const takenAt = edits.current.now()
+    const request = ++requests.current.count
+    try {
+      const fresh = await fetchDeal(id)
+      if ((requests.current.applied.get(id) ?? 0) > request) return true
+      serverDeals.current.set(id, fresh)
+      applied([fresh], request)
+      replaceDeal(id, (deal) => edits.current.merge(fresh, deal, takenAt))
+      return true
+    } catch (err) {
+      unsure.current.set(id, requests.current.count)
+      setNotice({ message: `Couldn't refresh ${company}: ${messageOf(err)}`, retry: () => void refreshDeal(id, company) })
+      return false
+    }
+  }
 
   // Edits show at once and save in the background. A save's answer updates the deal, except fields edited
   // since. If a save fails, each field it changed goes back to the server's value, unless a newer edit has
@@ -156,9 +221,10 @@ export default function App() {
   const saveDeal = (id: string, patch: DealPatch) => {
     const before = all.find((deal) => deal.id === id)
     if (!before) return
-    const { contactId, ...fields } = patch
+    const { contactId, ownerId, ...fields } = patch
     const local: Partial<Deal> = { ...fields }
     if (contactId !== undefined) local.contact = contacts.find((c) => c.id === contactId) ?? null
+    if (ownerId !== undefined) local.owner = members.find((m) => m.id === ownerId) ?? null
     // The fields this edit sets locally (a contactId shows as the contact itself). They count as saving
     // from now, while queued too, so no refresh replaces them before the save is through.
     const keys = Object.keys(local) as (keyof Deal)[]
@@ -173,26 +239,31 @@ export default function App() {
       try {
         const saved = await updateDeal(id, patch)
         edits.current.doneSaving(id, keys)
-        // Overtaken by a newer answer (a refresh after someone renamed the company, say): only the fields
-        // this save set come from it.
-        const overtaken = (requests.current.applied.get(id) ?? 0) > request
-        if (!overtaken) {
+        if ((requests.current.applied.get(id) ?? 0) > request) {
+          // A newer answer was applied while this save was out (a refresh, say), so which of the two holds
+          // the server's latest values is unclear: read the deal again rather than guess.
+          void refreshDeal(id, before.company)
+        } else {
           serverDeals.current.set(id, saved)
           applied([saved], request)
+          replaceDeal(id, (deal) => edits.current.merge(saved, deal, takenAt))
         }
-        replaceDeal(id, (deal) => {
-          const answer = overtaken ? { ...deal, ...Object.fromEntries(keys.map((key) => [key, saved[key]])) } : saved
-          return edits.current.merge(answer, deal, takenAt)
-        })
       } catch (err) {
         edits.current.doneSaving(id, keys)
+        // Without a known server version to go back to, read the deal again; failing that, use the last known.
+        if (unsure.current.has(id) && (await refreshDeal(id, before.company))) {
+          setNotice({ message: `Couldn't save ${before.company}: ${messageOf(err)}` })
+          return
+        }
         const last = serverDeals.current.get(id) ?? before
         replaceDeal(id, (deal) => {
           const reverted = { ...deal }
           for (const key of keys) if (edits.current.isLatest(id, key, edit)) Object.assign(reverted, { [key]: last[key] })
           return reverted
         })
-        setNotice({ message: `Couldn't save ${before.company}: ${messageOf(err)}` })
+        // If the deal's server version is still unknown, the notice offers to read it again.
+        const retry = unsure.current.has(id) ? () => void refreshDeal(id, before.company) : undefined
+        setNotice({ message: `Couldn't save ${before.company}: ${messageOf(err)}`, retry })
       }
     }
     const queued = (saveQueue.current.get(id) ?? Promise.resolve()).then(send)
@@ -207,7 +278,10 @@ export default function App() {
   const saveNote = async (id: string, text: string) => {
     const note = await addNote(id, text)
     edits.current.edit(id, ['activities'])
-    replaceDeal(id, (deal) => ({ ...deal, activities: [...deal.activities, note] }))
+    // Another answer may have brought the note already; it shows once.
+    replaceDeal(id, (deal) =>
+      deal.activities.some((a) => a.id === note.id) ? deal : { ...deal, activities: [...deal.activities, note] },
+    )
   }
 
   // A new lead is owned by whoever adds it (the server records the signed-in user), so adding waits
@@ -234,6 +308,22 @@ export default function App() {
     },
     remove: async (id) => {
       await deleteCompany(id)
+      await reload()
+    },
+  }
+  const teamActions: TeamActions = {
+    add: async (member) => {
+      await addMember(member)
+      await reload()
+    },
+    setRole: async (id, role) => {
+      await updateMember(id, { role })
+      // Changing your own role changes what you can do here: Reports, and managing the team.
+      if (id === user?.memberId) setUser(await fetchMe())
+      await reload()
+    },
+    remove: async (id) => {
+      await removeMember(id)
       await reload()
     },
   }
@@ -277,7 +367,7 @@ export default function App() {
         canAddLead={user !== null && data !== null}
         onNewLead={() => setAddingLead(true)}
       />
-      <MobileNav />
+      <MobileNav user={user} />
       <div className="flex min-h-0 flex-1">
         <Sidebar user={user} userError={userError} />
         <main className="flex min-w-0 flex-1 flex-col">
@@ -327,6 +417,7 @@ export default function App() {
                 element={
                   <PipelineView
                     deals={inSemester.filter((deal) => matches(deal, query))}
+                    meId={user?.memberId}
                     onSelect={setSelectedId}
                     onMove={(id, status) => saveDeal(id, { status })}
                   />
@@ -334,7 +425,22 @@ export default function App() {
               />
               <Route path="companies" element={<CompaniesPage companies={companies} contacts={contacts} deals={all} query={query} onSelect={openDeal} actions={companyActions} contactActions={contactActions} />} />
               <Route path="contacts" element={<ContactsPage companies={companies} contacts={contacts} deals={all} query={query} onSelect={openDeal} actions={contactActions} />} />
-              <Route path="reports" element={<ReportsPage deals={all} semester={semester} onSelect={openDeal} />} />
+              <Route
+                path="reports"
+                element={
+                  canSeeReports(user?.role) ? (
+                    <ReportsPage deals={all} semester={semester} onSelect={openDeal} />
+                  ) : (
+                    <p className="m-6 text-sm text-gray-500">
+                      {user ? 'Reports are for the board and admins.' : 'Loading…'}
+                    </p>
+                  )
+                }
+              />
+              <Route
+                path="team"
+                element={<TeamPage members={members} deals={all} meId={user?.memberId} isAdmin={isAdmin} actions={teamActions} />}
+              />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           )}
@@ -350,12 +456,24 @@ export default function App() {
             .sort((a, b) => compareSemesters(a.semester, b.semester))}
           onClose={() => setSelectedId(null)}
           companyContacts={contacts.filter((c) => c.companyId === selected.companyId)}
+          members={members}
+          meId={user?.memberId}
           onChange={(patch) => saveDeal(selected.id, patch)}
           onAddNote={(text) => saveNote(selected.id, text)}
           onSelect={openDeal}
         />
       )}
-      {addingLead && user && <NewLeadDialog semester={semester} companies={companies} contacts={contacts} onCreate={addLead} onClose={() => setAddingLead(false)} />}
+      {addingLead && user && (
+        <NewLeadDialog
+          semester={semester}
+          companies={companies}
+          contacts={contacts}
+          members={members}
+          meId={user.memberId}
+          onCreate={addLead}
+          onClose={() => setAddingLead(false)}
+        />
+      )}
     </div>
   )
 }

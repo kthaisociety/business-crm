@@ -64,8 +64,11 @@ export default function DealCard({ deal, onSelect }: Props) {
           {(deal.status === 'signed' || deal.status === 'finished') && <InvoiceBadge deal={deal} />}
         </div>
         <div className="flex -space-x-1.5">
+          {!deal.owner && (
+            <span className="rounded-full border border-dashed border-gray-300 px-1.5 py-0.5 text-[10px] text-gray-400">Unassigned</span>
+          )}
           {[deal.owner, ...deal.support].filter((p) => p !== null).map((person) => (
-            <OwnerAvatar key={person.name} owner={person} />
+            <OwnerAvatar key={person.id} owner={person} />
           ))}
         </div>
       </div>

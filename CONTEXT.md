@@ -17,7 +17,10 @@ Words as this project uses them.
 - **Company**: an organisation the team works with. It has deals and contacts, and its name is unique.
 - **Contact**: a person at a company, identified by their email. A deal's contact always works at the
   deal's company, and email sync and Fathom will match senders and attendees to contacts.
-- **Owner** and **Support**: the business-team member who runs a deal, and the members who help.
+- **Team member**: someone on the business team, with a role: **admin** (also manages the team),
+  **board** or **member** ([ADR 0003](docs/adr/0003-team-members-and-roles.md)).
+- **Owner** and **Support**: the team member who runs a deal, and the members who help. A lead can have no
+  owner yet; anyone can **claim** it (assign it to themselves) or assign it to someone else.
 - **Next step**: the one thing to do next on a deal, with an optional due date.
 - **Touchpoint**: an entry on a deal's timeline: an email, a meeting or a note. Email sync and Fathom
   meeting notes will add touchpoints on their own.
