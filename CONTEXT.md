@@ -26,8 +26,9 @@ Words as this project uses them.
 - **Owner** and **Support**: the team member who runs a deal, and the members who help. A lead can have no
   owner yet; anyone can **claim** it (assign it to themselves) or assign it to someone else.
 - **Next step**: the one thing to do next on a deal, with an optional due date.
-- **Touchpoint**: an entry on a deal's timeline: an email, a meeting or a note. Email sync and Fathom
-  meeting notes will add touchpoints on their own.
+- **Touchpoint**: an entry on a deal's timeline: an email, a meeting or a note. Email sync (each
+  member's connected Gmail) and Fathom meeting notes add touchpoints on their own
+  ([ADR 0006](docs/adr/0006-email-and-meeting-touchpoints.md)).
 - **Follow-up nudge**: the warning on an open deal whose next step is overdue, or that has had no
   touchpoint for 4 days.
 - **Fee** and **Invoice**: what the company pays (0 for a free event), and whether that has been invoiced
