@@ -23,6 +23,10 @@ company's replies.
 - Connecting is a second, separate Google consent from the same Internal OAuth client (ADR 0004), for
   `gmail.readonly` with offline access. Signing in never asks for Gmail. Because the client is Internal,
   Google doesn't review the app for this scope.
+- That client stays for Gmail when sign-in moves to identity-service: only its sign-in callback comes
+  off. This replaces ADR 0004's "the client is deleted", and keeps the departure from identity-service's
+  ADR 0002 for Gmail alone. If identity-service ever offers Gmail access itself, members reconnect
+  through it once, and this client goes then.
 - The refresh token is stored encrypted, with a key from config (`TOKEN_ENCRYPTION_KEY`, a secret, PCR
   0001), in a table of its own with the mailbox's Gmail `historyId`.
 - The server syncs each connected mailbox every few minutes in the background, asking Gmail only for
@@ -60,14 +64,19 @@ Fathom first: it needs no Google scope and no background sync, and it tests the 
 display on real data. Gmail second.
 
 ### Follow-up nudges know whose turn it is
-With emails, the nudge on an open deal knows who wrote last, so it says who owes a reply:
-- **Their email is the latest touchpoint**, with no reply for 2 days: *"Lina replied 2 days ago: your
-  turn"*, the more urgent kind.
-- **Our email is the latest touchpoint**, with no reply for 5 days: *"No reply from Lina for 5 days: follow
-  up?"*.
-- A note or a meeting is a touchpoint from both sides: nobody owes a reply after it.
-- As today, an overdue next step comes first, and a deal with no touchpoint for 4 days gets the
-  inactivity nudge. The 2 and 5 days are a starting point, to tune once the team has used it.
+With emails, the nudge on an open deal knows who wrote last, so it says who owes a reply. An open deal
+gets at most one nudge, the first that applies:
+1. **An overdue next step**, as today.
+2. **Their email is the latest touchpoint**, with no reply for 2 days: *"Lina replied 2 days ago: your
+   turn"*.
+3. **Our email is the latest touchpoint**, with no reply for 5 days: *"No reply from Lina for 5 days:
+   follow up?"*. Until then there's no nudge: the 4-day inactivity nudge doesn't apply while we're waiting
+   on their reply.
+4. **Otherwise** (the latest touchpoint is a note or a meeting, or there's none), the inactivity nudge
+   after 4 days, as today. A note or a meeting is a touchpoint from both sides: nobody owes a reply
+   after it.
+
+The 2, 4 and 5 days are a starting point, to tune once the team has used it.
 
 ### Trying it before it's live
 There's no staging: this is built and tried locally, then goes live. Locally, contacts and mail are the

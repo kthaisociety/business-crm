@@ -1,6 +1,6 @@
 # 0004. Sign in with OIDC, through Google until identity-service is live
 
-Status: Accepted; `ADMIN_EMAILS` superseded by 0005
+Status: Accepted; `ADMIN_EMAILS` superseded by 0005; deleting the Google client superseded by 0006
 
 ## Context
 The app has simulated sign-in (PCR 0005), so it can't hold the team's real deals. identity-service will
