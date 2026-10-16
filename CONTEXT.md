@@ -29,7 +29,9 @@ Words as this project uses them.
 - **Touchpoint**: an entry on a deal's timeline: an email, a meeting or a note. Email sync (each
   member's connected Gmail) and Fathom meeting notes add touchpoints on their own
   ([ADR 0006](docs/adr/0006-email-and-meeting-touchpoints.md)).
-- **Follow-up nudge**: the warning on an open deal whose next step is overdue, or that has had no
-  touchpoint for 4 days.
+- **Follow-up nudge**: the one warning an open deal shows when it needs attention, the first that applies:
+  its next step is overdue; the company's email has waited 2 days for our reply ("your turn"); our email
+  has waited 5 days for theirs ("no reply"); or, with a note, meeting or nothing last, no touchpoint for
+  4 days ([ADR 0006](docs/adr/0006-email-and-meeting-touchpoints.md)).
 - **Fee** and **Invoice**: what the company pays (0 for a free event), and whether that has been invoiced
   and paid.
