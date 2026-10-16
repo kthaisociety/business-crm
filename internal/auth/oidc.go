@@ -235,7 +235,10 @@ func randomString() string { return base64.RawURLEncoding.EncodeToString(randomB
 
 // Client is an HTTP client acting with this refresh token, getting access tokens from the provider as it
 // needs them. A grant the person has withdrawn fails its requests with an *oauth2.RetrieveError whose
-// ErrorCode is "invalid_grant".
+// ErrorCode is "invalid_grant". Each request, and each token refresh, gives up after providerTimeout.
 func (o *OIDC) Client(ctx context.Context, refreshToken string) *http.Client {
-	return o.oauth.Client(ctx, &oauth2.Token{RefreshToken: refreshToken})
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, &http.Client{Timeout: providerTimeout})
+	c := o.oauth.Client(ctx, &oauth2.Token{RefreshToken: refreshToken})
+	c.Timeout = providerTimeout
+	return c
 }

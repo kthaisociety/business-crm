@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -22,18 +24,32 @@ import (
 	"github.com/kthaisociety/business-crm/internal/secretbox"
 )
 
-// fakeGmail is Gmail's API for test mailboxes, keyed by the refresh token each mailbox was connected with.
+// fakeGmail is Gmail's API for test mailboxes, keyed by the refresh token each mailbox was connected
+// with. Like Gmail it numbers changes, answers history only from the id it's asked for, pages its lists,
+// and checks what it's asked.
 type fakeGmail struct {
+	t        *testing.T
 	mu       sync.Mutex
-	messages map[string]map[string]any // token → message id → message
-	recent   map[string][]string       // token → ids the backfill lists
-	added    map[string][]string       // token → ids added since the last history id
-	history  string                    // the history id every mailbox is at
-	gone     bool                      // history too old to answer
+	messages map[string]map[string]map[string]any // token → message id → message
+	recent   map[string][]string                  // token → ids the backfill lists
+	changes  map[string][]change                  // token → changes, in order
+	seq      int                                  // the latest change's history id
+	oldest   int                                  // history before this is gone
+	pageSize int                                  // 0: everything on one page
+	failPage string                               // a pageToken to answer 500 once
+	asked    []string                             // startHistoryIds asked for
+	stalled  chan struct{}                        // while open, requests hang until it's closed or they're cancelled
+	waiting  chan struct{}                        // gets a value when a request starts hanging
+}
+
+type change struct {
+	seq      int
+	id       string
+	restored bool // taken out of spam or trash, rather than new
 }
 
 func newFakeGmail(t *testing.T) *fakeGmail {
-	f := &fakeGmail{messages: map[string]map[string]any{}, recent: map[string][]string{}, added: map[string][]string{}, history: "100"}
+	f := &fakeGmail{t: t, messages: map[string]map[string]map[string]any{}, recent: map[string][]string{}, changes: map[string][]change{}, seq: 100}
 	srv := httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(srv.Close)
 	before := gmail.API
@@ -42,12 +58,12 @@ func newFakeGmail(t *testing.T) *fakeGmail {
 	return f
 }
 
-// mail adds a message to a mailbox, listed by the backfill or, with added, as new since the last sync.
+// mail adds a message to a mailbox: listed by the backfill or, with added, as a new change.
 func (f *fakeGmail) mail(token, id, from, to, subject string, labels []string, added bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.messages[token] == nil {
-		f.messages[token] = map[string]any{}
+		f.messages[token] = map[string]map[string]any{}
 	}
 	f.messages[token][id] = map[string]any{
 		"id": id, "threadId": "thread-" + id, "labelIds": labels, "snippet": "It&#39;s about " + subject,
@@ -58,39 +74,98 @@ func (f *fakeGmail) mail(token, id, from, to, subject string, labels []string, a
 		}},
 	}
 	if added {
-		f.added[token] = append(f.added[token], id)
+		f.seq++
+		f.changes[token] = append(f.changes[token], change{seq: f.seq, id: id})
 	} else {
 		f.recent[token] = append(f.recent[token], id)
 	}
 }
 
-func (f *fakeGmail) serve(w http.ResponseWriter, r *http.Request) {
+// restore takes a message out of spam or trash, into the inbox.
+func (f *fakeGmail) restore(token, id string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	token := r.Header.Get("X-Test-Token")
-	write := func(v any) { _ = json.NewEncoder(w).Encode(v) }
-	ids := func(list []string) []map[string]string {
-		out := []map[string]string{}
-		for _, id := range list {
-			out = append(out, map[string]string{"id": id})
+	f.messages[token][id]["labelIds"] = []string{"INBOX"}
+	f.seq++
+	f.changes[token] = append(f.changes[token], change{seq: f.seq, id: id, restored: true})
+}
+
+// page cuts a list of n at pageToken, a plain offset here, and gives the next page's token.
+func (f *fakeGmail) page(n int, pageToken string) (from, to int, next string) {
+	from, _ = strconv.Atoi(pageToken)
+	to = n
+	if f.pageSize > 0 && from+f.pageSize < n {
+		to = from + f.pageSize
+		next = strconv.Itoa(to)
+	}
+	return from, to, next
+}
+
+func (f *fakeGmail) serve(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	stalled, waiting := f.stalled, f.waiting
+	f.mu.Unlock()
+	if stalled != nil {
+		waiting <- struct{}{}
+		select {
+		case <-stalled:
+		case <-r.Context().Done():
+			return
 		}
-		return out
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	token, q := r.Header.Get("X-Test-Token"), r.URL.Query()
+	write := func(v any) { _ = json.NewEncoder(w).Encode(v) }
+	if pt := q.Get("pageToken"); pt != "" && pt == f.failPage {
+		f.failPage = ""
+		http.Error(w, "backend error", http.StatusInternalServerError)
+		return
 	}
 	switch {
 	case r.URL.Path == "/profile":
-		write(map[string]string{"historyId": f.history})
+		write(map[string]string{"historyId": strconv.Itoa(f.seq)})
 	case r.URL.Path == "/messages":
-		write(map[string]any{"messages": ids(f.recent[token])})
+		if q.Get("q") != "newer_than:30d" {
+			f.t.Errorf("backfill asked q=%q", q.Get("q"))
+		}
+		list := f.recent[token]
+		from, to, next := f.page(len(list), q.Get("pageToken"))
+		page := []map[string]string{}
+		for _, id := range list[from:to] {
+			page = append(page, map[string]string{"id": id})
+		}
+		write(map[string]any{"messages": page, "nextPageToken": next})
 	case r.URL.Path == "/history":
-		if f.gone {
+		start, err := strconv.Atoi(q.Get("startHistoryId"))
+		if err != nil || !slices.Contains(q["historyTypes"], "messageAdded") || !slices.Contains(q["historyTypes"], "labelRemoved") {
+			http.Error(w, "bad history request", http.StatusBadRequest)
+			return
+		}
+		if q.Get("pageToken") == "" {
+			f.asked = append(f.asked, q.Get("startHistoryId"))
+		}
+		if start < f.oldest {
 			http.Error(w, "too old", http.StatusNotFound)
 			return
 		}
-		var added []map[string]any
-		for _, id := range f.added[token] {
-			added = append(added, map[string]any{"message": map[string]string{"id": id}})
+		var since []change
+		for _, c := range f.changes[token] {
+			if c.seq > start {
+				since = append(since, c)
+			}
 		}
-		write(map[string]any{"history": []map[string]any{{"messagesAdded": added}}, "historyId": f.history})
+		from, to, next := f.page(len(since), q.Get("pageToken"))
+		history := []map[string]any{}
+		for _, c := range since[from:to] {
+			msg := map[string]string{"id": c.id}
+			if c.restored {
+				history = append(history, map[string]any{"labelsRemoved": []map[string]any{{"message": msg, "labelIds": []string{"SPAM"}}}})
+			} else {
+				history = append(history, map[string]any{"messagesAdded": []map[string]any{{"message": msg}}})
+			}
+		}
+		write(map[string]any{"history": history, "historyId": strconv.Itoa(f.seq), "nextPageToken": next})
 	case strings.HasPrefix(r.URL.Path, "/messages/"):
 		msg, ok := f.messages[token][strings.TrimPrefix(r.URL.Path, "/messages/")]
 		if !ok {
@@ -100,6 +175,25 @@ func (f *fakeGmail) serve(w http.ResponseWriter, r *http.Request) {
 		write(msg)
 	default:
 		http.NotFound(w, r)
+	}
+}
+
+// stall makes requests hang; the returned func lets them go.
+func (f *fakeGmail) stall() func() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stalled, f.waiting = make(chan struct{}), make(chan struct{}, 10)
+	stalled := f.stalled
+	var once sync.Once
+	return func() { once.Do(func() { close(stalled) }) }
+}
+
+func (f *fakeGmail) waitForStalled(t *testing.T) {
+	t.Helper()
+	select {
+	case <-f.waiting:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no request reached Gmail")
 	}
 }
 
@@ -171,6 +265,13 @@ func (w *world) emails(t *testing.T) []deals.ActivityView {
 	return out
 }
 
+func (w *world) historyID(t *testing.T) string {
+	t.Helper()
+	var row struct{ HistoryID string }
+	require.NoError(t, w.db.Raw("SELECT history_id FROM gmail_connections").Scan(&row).Error)
+	return row.HistoryID
+}
+
 func (w *world) status(t *testing.T, email string) gmail.Status {
 	t.Helper()
 	s, err := w.conns.Status(context.Background(), w.members[email])
@@ -217,13 +318,11 @@ func TestLaterSyncsBringOnlyNewMail(t *testing.T) {
 	require.NoError(t, w.syncer.SyncAll(context.Background()))
 
 	f.mail(tok, "m5", "lina.dahl@granit.example", "maja@example.com", "Second", nil, true)
-	f.history = "200"
 	require.NoError(t, w.syncer.SyncAll(context.Background()))
 
 	assert.Len(t, w.emails(t), 2)
-	var history string
-	require.NoError(t, w.db.Raw("SELECT history_id FROM gmail_connections").Scan(&history).Error)
-	assert.Equal(t, "200", history)
+	assert.Equal(t, []string{"100"}, f.asked, "carrying on from where the first sync left off")
+	assert.Equal(t, "101", w.historyID(t))
 }
 
 func TestWhenGmailForgetsTheHistoryTheSyncStartsOver(t *testing.T) {
@@ -234,7 +333,7 @@ func TestWhenGmailForgetsTheHistoryTheSyncStartsOver(t *testing.T) {
 	f.mail(tok, "m1", "lina.dahl@granit.example", "maja@example.com", "First", nil, false)
 	require.NoError(t, w.syncer.SyncAll(context.Background()))
 
-	f.gone = true
+	f.oldest = f.seq + 1
 	require.NoError(t, w.syncer.SyncAll(context.Background()))
 
 	assert.Len(t, w.emails(t), 1, "the backfill again, without doubles")
@@ -269,24 +368,65 @@ func TestAWithdrawnGrantAsksToReconnect(t *testing.T) {
 	assert.Equal(t, gmail.NeedsReconnect, w.status(t, "maja@example.com").SyncError)
 }
 
-func TestAMailboxBeingSyncedElsewhereIsSkipped(t *testing.T) {
+func TestAMailboxAnotherReplicaHasIsSkipped(t *testing.T) {
 	f := newFakeGmail(t)
 	w := newWorld(t)
 	w.connect(t, "maja@example.com")
 	f.mail("token-maja@example.com", "m1", "lina.dahl@granit.example", "maja@example.com", "First", nil, false)
-	other := w.db.Begin()
-	defer other.Rollback()
-	require.NoError(t, other.Exec("SELECT 1 FROM gmail_connections FOR UPDATE").Error)
+	require.NoError(t, w.db.Exec("UPDATE gmail_connections SET lease_until = now() + interval '1 minute'").Error)
 
-	done := make(chan error, 1)
-	go func() { done <- w.syncer.SyncOne(context.Background(), w.members["maja@example.com"]) }()
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+
+	assert.Empty(t, w.emails(t))
+	require.NoError(t, w.db.Exec("UPDATE gmail_connections SET lease_until = now() - interval '1 second'").Error)
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+	assert.Len(t, w.emails(t), 1, "an expired lease, from a replica that died, is taken over")
+}
+
+// A sync stuck on Gmail holds no lock: removing the member, disconnecting or reconnecting goes ahead.
+func TestASyncWaitingOnGmailBlocksNothing(t *testing.T) {
+	f := newFakeGmail(t)
+	w := newWorld(t)
+	w.connect(t, "maja@example.com")
+	f.mail("token-maja@example.com", "m1", "lina.dahl@granit.example", "maja@example.com", "First", nil, false)
+	release := f.stall()
+	defer release()
+	syncing := make(chan error, 1)
+	go func() { syncing <- w.syncer.SyncOne(context.Background(), w.members["maja@example.com"]) }()
+	f.waitForStalled(t)
+
+	removed := make(chan error, 1)
+	go func() { removed <- w.store.RemoveMember(context.Background(), w.members["maja@example.com"]) }()
 	select {
-	case err := <-done:
+	case err := <-removed:
 		require.NoError(t, err)
 	case <-time.After(5 * time.Second):
-		t.Fatal("the sync waited for the other replica instead of skipping")
+		t.Fatal("removing the member waited on the sync")
 	}
-	assert.Empty(t, w.emails(t))
+	release()
+	require.NoError(t, <-syncing)
+	var left int64
+	require.NoError(t, w.db.Raw("SELECT count(*) FROM gmail_connections").Scan(&left).Error)
+	assert.Zero(t, left, "the finished sync doesn't bring the removed mailbox back")
+}
+
+func TestAGmailThatStopsAnsweringDoesntHoldUpTheSync(t *testing.T) {
+	f := newFakeGmail(t)
+	w := newWorld(t)
+	w.connect(t, "maja@example.com")
+	defer gmail.SetSyncTimeout(200 * time.Millisecond)()
+	release := f.stall()
+	defer release()
+
+	start := time.Now()
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+
+	assert.Less(t, time.Since(start), 5*time.Second)
+	s := w.status(t, "maja@example.com")
+	assert.NotEmpty(t, s.SyncError)
+	var row struct{ LeaseUntil *time.Time }
+	require.NoError(t, w.db.Raw("SELECT lease_until FROM gmail_connections").Scan(&row).Error)
+	assert.Nil(t, row.LeaseUntil, "the lease is let go, so the next run tries again")
 }
 
 
@@ -302,4 +442,73 @@ func TestATeamMembersAddressNeverCountsAsAContact(t *testing.T) {
 	require.NoError(t, w.syncer.SyncAll(context.Background()))
 
 	assert.Empty(t, w.emails(t))
+}
+
+func TestTheBackfillReadsEveryPage(t *testing.T) {
+	f := newFakeGmail(t)
+	w := newWorld(t)
+	w.connect(t, "maja@example.com")
+	f.pageSize = 2
+	for _, id := range []string{"m1", "m2", "m3", "m4", "m5"} {
+		f.mail("token-maja@example.com", id, "lina.dahl@granit.example", "maja@example.com", "Mail "+id, nil, false)
+	}
+
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+
+	assert.Len(t, w.emails(t), 5)
+}
+
+func TestHistoryIsReadPageByPageFromTheCheckpoint(t *testing.T) {
+	f := newFakeGmail(t)
+	w := newWorld(t)
+	w.connect(t, "maja@example.com")
+	tok := "token-maja@example.com"
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+	f.pageSize = 2
+	for _, id := range []string{"n1", "n2", "n3", "n4", "n5"} {
+		f.mail(tok, id, "lina.dahl@granit.example", "maja@example.com", "New "+id, nil, true)
+	}
+
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+
+	assert.Len(t, w.emails(t), 5)
+	assert.Equal(t, "105", w.historyID(t))
+}
+
+// A page failing partway leaves the checkpoint where it was, so the next run reads that range again
+// rather than skipping past what it missed.
+func TestAFailedPageKeepsTheCheckpoint(t *testing.T) {
+	f := newFakeGmail(t)
+	w := newWorld(t)
+	w.connect(t, "maja@example.com")
+	tok := "token-maja@example.com"
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+	f.pageSize, f.failPage = 2, "4"
+	for _, id := range []string{"n1", "n2", "n3", "n4", "n5"} {
+		f.mail(tok, id, "lina.dahl@granit.example", "maja@example.com", "New "+id, nil, true)
+	}
+
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+	assert.Equal(t, "100", w.historyID(t))
+	assert.NotEmpty(t, w.status(t, "maja@example.com").SyncError)
+
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+	assert.Len(t, w.emails(t), 5)
+	assert.Equal(t, "105", w.historyID(t))
+	assert.Equal(t, []string{"100", "100"}, f.asked, "both runs after the backfill start from its checkpoint")
+}
+
+func TestMailTakenOutOfSpamIsBroughtIn(t *testing.T) {
+	f := newFakeGmail(t)
+	w := newWorld(t)
+	w.connect(t, "maja@example.com")
+	tok := "token-maja@example.com"
+	f.mail(tok, "m1", "lina.dahl@granit.example", "maja@example.com", "Caught as spam", []string{"SPAM"}, false)
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+	require.Empty(t, w.emails(t))
+
+	f.restore(tok, "m1")
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+
+	assert.Len(t, w.emails(t), 1)
 }

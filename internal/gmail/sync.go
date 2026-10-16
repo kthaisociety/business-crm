@@ -29,6 +29,12 @@ var API = "https://gmail.googleapis.com/gmail/v1/users/me"
 // Backfill is how far back a mailbox's first sync looks, so conversations already under way show up.
 const Backfill = 30 * 24 * time.Hour
 
+// Lease is how long a replica has a mailbox to itself; SyncOne gives up before then.
+const Lease = 15 * time.Minute
+
+// syncTimeout bounds one mailbox's sync, so a slow mailbox can't hold up the others for long.
+var syncTimeout = 10 * time.Minute
+
 // NeedsReconnect is the sync error of a mailbox whose grant Google no longer honours: revoked, or its
 // password changed. Only connecting again fixes it.
 const NeedsReconnect = "Google no longer lets Lucid read this mailbox: connect Gmail again"
@@ -87,31 +93,34 @@ func (s *Syncer) SyncAll(ctx context.Context) error {
 	return nil
 }
 
-// SyncOne syncs one mailbox, unless another replica is syncing it. Only database errors are returned;
-// Gmail's are kept on the connection.
+// SyncOne syncs one mailbox, unless another replica has it. It holds no lock while it talks to Gmail:
+// it takes a lease, so disconnecting, reconnecting or removing the member never waits on the sync. Only
+// database errors are returned; Gmail's are kept on the connection.
 func (s *Syncer) SyncOne(ctx context.Context, memberID string) error {
-	return s.conns.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var row connection
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("member_id = ?", memberID).Take(&row).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil // disconnected meanwhile, or being synced elsewhere
-		}
-		if err != nil {
-			return err
-		}
-		token, err := s.conns.box.Open(row.RefreshToken)
-		if err != nil {
-			return tx.Model(&row).Update("sync_error", "the stored token can't be read: connect Gmail again").Error
-		}
-		mailbox := &mailbox{http: s.client(ctx, string(token)), email: row.Email}
-		history, err := s.sync(ctx, mailbox, row.HistoryID)
-		if err != nil {
-			log.Printf("gmail sync of %s: %v", row.Email, err)
-			return tx.Model(&row).Update("sync_error", syncError(err)).Error
-		}
-		return tx.Model(&row).Updates(map[string]any{"history_id": history, "synced_at": time.Now(), "sync_error": ""}).Error
-	})
+	db := s.conns.db.WithContext(ctx)
+	var row connection
+	res := db.Clauses(clause.Returning{}).Model(&row).
+		Where("member_id = ? AND (lease_until IS NULL OR lease_until < now())", memberID).
+		Update("lease_until", gorm.Expr("now() + make_interval(secs => ?)", Lease.Seconds()))
+	if res.Error != nil || res.RowsAffected == 0 {
+		return res.Error // disconnected meanwhile, or another replica has it
+	}
+	// The connection as it was when leased: if it's been replaced since (reconnected), what's learnt here
+	// is about the old one and isn't written back.
+	same := db.Model(&connection{}).Where("member_id = ? AND connected_at = ?", row.MemberID, row.ConnectedAt)
+	token, err := s.conns.box.Open(row.RefreshToken)
+	if err != nil {
+		return same.Updates(map[string]any{"sync_error": "the stored token can't be read: connect Gmail again", "lease_until": nil}).Error
+	}
+	syncCtx, cancel := context.WithTimeout(ctx, syncTimeout)
+	defer cancel()
+	mailbox := &mailbox{http: s.client(syncCtx, string(token)), email: row.Email}
+	history, err := s.sync(syncCtx, mailbox, row.HistoryID)
+	if err != nil {
+		log.Printf("gmail sync of %s: %v", row.Email, err)
+		return same.Updates(map[string]any{"sync_error": syncError(err), "lease_until": nil}).Error
+	}
+	return same.Updates(map[string]any{"history_id": history, "synced_at": time.Now(), "sync_error": "", "lease_until": nil}).Error
 }
 
 // sync records the mailbox's mail since history, or its last Backfill when there's no usable history,
@@ -302,11 +311,17 @@ func (m *mailbox) recent(ctx context.Context, back time.Duration) ([]string, err
 	}
 }
 
-// since lists the ids of messages added after history, and the history id to carry on from.
+// since lists the ids of messages added after history, or taken out of spam or trash since (they were
+// skipped while there), and the history id to carry on from.
 func (m *mailbox) since(ctx context.Context, history string) ([]string, string, error) {
 	var ids []string
 	next := history
-	q := url.Values{"startHistoryId": {history}, "historyTypes": {"messageAdded"}, "maxResults": {"500"}}
+	q := url.Values{"startHistoryId": {history}, "historyTypes": {"messageAdded", "labelRemoved"}, "maxResults": {"500"}}
+	add := func(id string) {
+		if !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
 	for {
 		var page struct {
 			History []struct {
@@ -315,6 +330,12 @@ func (m *mailbox) since(ctx context.Context, history string) ([]string, string, 
 						ID string `json:"id"`
 					} `json:"message"`
 				} `json:"messagesAdded"`
+				LabelsRemoved []struct {
+					Message struct {
+						ID string `json:"id"`
+					} `json:"message"`
+					LabelIDs []string `json:"labelIds"`
+				} `json:"labelsRemoved"`
 			} `json:"history"`
 			HistoryID     string `json:"historyId"`
 			NextPageToken string `json:"nextPageToken"`
@@ -328,8 +349,11 @@ func (m *mailbox) since(ctx context.Context, history string) ([]string, string, 
 		}
 		for _, h := range page.History {
 			for _, added := range h.MessagesAdded {
-				if !slices.Contains(ids, added.Message.ID) {
-					ids = append(ids, added.Message.ID)
+				add(added.Message.ID)
+			}
+			for _, removed := range h.LabelsRemoved {
+				if slices.Contains(removed.LabelIDs, "SPAM") || slices.Contains(removed.LabelIDs, "TRASH") {
+					add(removed.Message.ID)
 				}
 			}
 		}
