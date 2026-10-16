@@ -38,8 +38,11 @@ type fakeGmail struct {
 	pageSize int                                  // 0: everything on one page
 	failPage string                               // a pageToken to answer 500 once
 	asked    []string                             // startHistoryIds asked for
+	pages    []string                             // backfill pageTokens asked for
+	fetched  map[string]int                       // message id → times fetched
 	stalled  chan struct{}                        // while open, requests hang until it's closed or they're cancelled
 	waiting  chan struct{}                        // gets a value when a request starts hanging
+	stallOn  string                               // only requests for this path hang; "" all of them
 }
 
 type change struct {
@@ -49,7 +52,7 @@ type change struct {
 }
 
 func newFakeGmail(t *testing.T) *fakeGmail {
-	f := &fakeGmail{t: t, messages: map[string]map[string]map[string]any{}, recent: map[string][]string{}, changes: map[string][]change{}, seq: 100}
+	f := &fakeGmail{t: t, messages: map[string]map[string]map[string]any{}, recent: map[string][]string{}, changes: map[string][]change{}, seq: 100, fetched: map[string]int{}}
 	srv := httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(srv.Close)
 	before := gmail.API
@@ -104,6 +107,9 @@ func (f *fakeGmail) page(n int, pageToken string) (from, to int, next string) {
 func (f *fakeGmail) serve(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	stalled, waiting := f.stalled, f.waiting
+	if f.stallOn != "" && r.URL.Path != f.stallOn {
+		stalled = nil
+	}
 	f.mu.Unlock()
 	if stalled != nil {
 		waiting <- struct{}{}
@@ -130,6 +136,7 @@ func (f *fakeGmail) serve(w http.ResponseWriter, r *http.Request) {
 			f.t.Errorf("backfill asked q=%q", q.Get("q"))
 		}
 		list := f.recent[token]
+		f.pages = append(f.pages, q.Get("pageToken"))
 		from, to, next := f.page(len(list), q.Get("pageToken"))
 		page := []map[string]string{}
 		for _, id := range list[from:to] {
@@ -158,15 +165,16 @@ func (f *fakeGmail) serve(w http.ResponseWriter, r *http.Request) {
 		from, to, next := f.page(len(since), q.Get("pageToken"))
 		history := []map[string]any{}
 		for _, c := range since[from:to] {
-			msg := map[string]string{"id": c.id}
+			msg, id := map[string]string{"id": c.id}, strconv.Itoa(c.seq)
 			if c.restored {
-				history = append(history, map[string]any{"labelsRemoved": []map[string]any{{"message": msg, "labelIds": []string{"SPAM"}}}})
+				history = append(history, map[string]any{"id": id, "labelsRemoved": []map[string]any{{"message": msg, "labelIds": []string{"SPAM"}}}})
 			} else {
-				history = append(history, map[string]any{"messagesAdded": []map[string]any{{"message": msg}}})
+				history = append(history, map[string]any{"id": id, "messagesAdded": []map[string]any{{"message": msg}}})
 			}
 		}
 		write(map[string]any{"history": history, "historyId": strconv.Itoa(f.seq), "nextPageToken": next})
 	case strings.HasPrefix(r.URL.Path, "/messages/"):
+		f.fetched[strings.TrimPrefix(r.URL.Path, "/messages/")]++
 		msg, ok := f.messages[token][strings.TrimPrefix(r.URL.Path, "/messages/")]
 		if !ok {
 			http.NotFound(w, r)
@@ -429,7 +437,6 @@ func TestAGmailThatStopsAnsweringDoesntHoldUpTheSync(t *testing.T) {
 	assert.Nil(t, row.LeaseUntil, "the lease is let go, so the next run tries again")
 }
 
-
 // A member who is also on the contact list, by mistake or to test, would otherwise match all their mail.
 func TestATeamMembersAddressNeverCountsAsAContact(t *testing.T) {
 	f := newFakeGmail(t)
@@ -475,9 +482,9 @@ func TestHistoryIsReadPageByPageFromTheCheckpoint(t *testing.T) {
 	assert.Equal(t, "105", w.historyID(t))
 }
 
-// A page failing partway leaves the checkpoint where it was, so the next run reads that range again
-// rather than skipping past what it missed.
-func TestAFailedPageKeepsTheCheckpoint(t *testing.T) {
+// A page failing partway leaves the checkpoint after the last page that was recorded, so the next run
+// carries on from there: it neither skips what it missed nor reads the rest again.
+func TestAFailedPageKeepsTheCheckpointOfTheLastGoodPage(t *testing.T) {
 	f := newFakeGmail(t)
 	w := newWorld(t)
 	w.connect(t, "maja@example.com")
@@ -489,13 +496,14 @@ func TestAFailedPageKeepsTheCheckpoint(t *testing.T) {
 	}
 
 	require.NoError(t, w.syncer.SyncAll(context.Background()))
-	assert.Equal(t, "100", w.historyID(t))
+	assert.Equal(t, "104", w.historyID(t), "two pages of two were recorded before the third failed")
 	assert.NotEmpty(t, w.status(t, "maja@example.com").SyncError)
+	assert.Len(t, w.emails(t), 4)
 
 	require.NoError(t, w.syncer.SyncAll(context.Background()))
 	assert.Len(t, w.emails(t), 5)
 	assert.Equal(t, "105", w.historyID(t))
-	assert.Equal(t, []string{"100", "100"}, f.asked, "both runs after the backfill start from its checkpoint")
+	assert.Equal(t, []string{"100", "104"}, f.asked)
 }
 
 func TestMailTakenOutOfSpamIsBroughtIn(t *testing.T) {
@@ -511,4 +519,56 @@ func TestMailTakenOutOfSpamIsBroughtIn(t *testing.T) {
 	require.NoError(t, w.syncer.SyncAll(context.Background()))
 
 	assert.Len(t, w.emails(t), 1)
+}
+
+// Removing a member while their mailbox syncs stops the sync: nothing more is read or recorded.
+func TestRemovingAMemberStopsTheirSyncMidway(t *testing.T) {
+	f := newFakeGmail(t)
+	w := newWorld(t)
+	w.connect(t, "maja@example.com")
+	tok := "token-maja@example.com"
+	for _, id := range []string{"m1", "m2", "m3"} {
+		f.mail(tok, id, "lina.dahl@granit.example", "maja@example.com", "Mail "+id, nil, false)
+	}
+	f.stallOn = "/messages/m2"
+	release := f.stall()
+	defer release()
+	syncing := make(chan error, 1)
+	go func() { syncing <- w.syncer.SyncOne(context.Background(), w.members["maja@example.com"]) }()
+	f.waitForStalled(t)
+
+	require.NoError(t, w.store.RemoveMember(context.Background(), w.members["maja@example.com"]))
+	release()
+	require.NoError(t, <-syncing)
+
+	titles := []string{}
+	for _, e := range w.emails(t) {
+		titles = append(titles, e.Title)
+	}
+	assert.Equal(t, []string{"Mail m1"}, titles, "m2 was fetched as the member was removed, and isn't recorded")
+	assert.Zero(t, f.fetched["m3"], "nothing more is read")
+}
+
+// A backfill cut off partway carries on from the page it reached, without fetching what it had again.
+func TestAnUnfinishedBackfillCarriesOn(t *testing.T) {
+	f := newFakeGmail(t)
+	w := newWorld(t)
+	w.connect(t, "maja@example.com")
+	f.pageSize, f.failPage = 2, "4"
+	for _, id := range []string{"m1", "m2", "m3", "m4", "m5"} {
+		f.mail("token-maja@example.com", id, "lina.dahl@granit.example", "maja@example.com", "Mail "+id, nil, false)
+	}
+
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+	assert.Len(t, w.emails(t), 4)
+	assert.Empty(t, w.historyID(t), "no checkpoint until the backfill is done")
+
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+	assert.Len(t, w.emails(t), 5)
+	assert.Equal(t, "100", w.historyID(t))
+	// The failed request for page 4 isn't counted: the second run asks for it first.
+	assert.Equal(t, []string{"", "2", "4"}, f.pages, "the second run starts at the page the first didn't finish")
+	for _, id := range []string{"m1", "m2", "m3", "m4"} {
+		assert.Equal(t, 1, f.fetched[id], id)
+	}
 }

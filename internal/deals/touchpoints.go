@@ -27,6 +27,10 @@ type Touchpoint struct {
 	// An email's sender. Sent by someone on the team, it's "sent" and they're its author; otherwise
 	// "received". So the same email reads the same way whichever member's mailbox it was found in.
 	From string
+	// Guard, if set, runs first in the transaction that records the touchpoint, and stops it with its
+	// error: e.g. a Gmail sync checking the mailbox is still connected, so nothing lands after the
+	// member is removed or disconnects.
+	Guard func(tx *gorm.DB) error
 }
 
 // Record puts a touchpoint on the deals of every company with a contact on it: the company's open deals,
@@ -46,6 +50,11 @@ func (s *Store) Record(ctx context.Context, t Touchpoint) (int, error) {
 	}
 	recorded := 0
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if t.Guard != nil {
+			if err := t.Guard(tx); err != nil {
+				return err
+			}
+		}
 		var dealIDs []string
 		err := tx.Raw(`
 			WITH matched AS (

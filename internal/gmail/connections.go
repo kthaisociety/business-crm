@@ -53,6 +53,9 @@ type connection struct {
 	SyncedAt     *time.Time
 	SyncError    string
 	LeaseUntil   *time.Time
+	// The first sync's progress: the history id it started at, and its next page.
+	BackfillHistory *string
+	BackfillPage    *string
 }
 
 func (connection) TableName() string { return "gmail_connections" }
@@ -71,7 +74,7 @@ func (c *Connections) Save(ctx context.Context, memberID, email, refreshToken st
 	row := connection{MemberID: memberID, Email: strings.ToLower(email), RefreshToken: c.box.Seal([]byte(refreshToken)), ConnectedAt: time.Now()}
 	return c.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "member_id"}},
-		DoUpdates: clause.Assignments(map[string]any{"email": row.Email, "refresh_token": row.RefreshToken, "history_id": nil, "connected_at": row.ConnectedAt, "synced_at": nil, "sync_error": "", "lease_until": nil}),
+		DoUpdates: clause.Assignments(map[string]any{"email": row.Email, "refresh_token": row.RefreshToken, "history_id": nil, "connected_at": row.ConnectedAt, "synced_at": nil, "sync_error": "", "lease_until": nil, "backfill_history": nil, "backfill_page": nil}),
 	}).Create(&row).Error
 }
 

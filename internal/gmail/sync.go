@@ -94,8 +94,11 @@ func (s *Syncer) SyncAll(ctx context.Context) error {
 }
 
 // SyncOne syncs one mailbox, unless another replica has it. It holds no lock while it talks to Gmail:
-// it takes a lease, so disconnecting, reconnecting or removing the member never waits on the sync. Only
-// database errors are returned; Gmail's are kept on the connection.
+// it takes a lease, so disconnecting, reconnecting or removing the member never waits on the sync. And it
+// stops as soon as the mailbox is gone: each email is recorded only after checking, in the same
+// transaction, that the connection is still the one it leased. Progress is saved page by page, so a
+// sync stopped by its deadline carries on next time. Only database errors are returned; Gmail's are kept
+// on the connection.
 func (s *Syncer) SyncOne(ctx context.Context, memberID string) error {
 	db := s.conns.db.WithContext(ctx)
 	var row connection
@@ -105,58 +108,176 @@ func (s *Syncer) SyncOne(ctx context.Context, memberID string) error {
 	if res.Error != nil || res.RowsAffected == 0 {
 		return res.Error // disconnected meanwhile, or another replica has it
 	}
-	// The connection as it was when leased: if it's been replaced since (reconnected), what's learnt here
-	// is about the old one and isn't written back.
-	same := db.Model(&connection{}).Where("member_id = ? AND connected_at = ?", row.MemberID, row.ConnectedAt)
+	r := &run{s: s, db: db, row: row}
 	token, err := s.conns.box.Open(row.RefreshToken)
 	if err != nil {
-		return same.Updates(map[string]any{"sync_error": "the stored token can't be read: connect Gmail again", "lease_until": nil}).Error
+		return r.finish(map[string]any{"sync_error": "the stored token can't be read: connect Gmail again"})
 	}
 	syncCtx, cancel := context.WithTimeout(ctx, syncTimeout)
 	defer cancel()
-	mailbox := &mailbox{http: s.client(syncCtx, string(token)), email: row.Email}
-	history, err := s.sync(syncCtx, mailbox, row.HistoryID)
-	if err != nil {
+	r.m = &mailbox{http: s.client(syncCtx, string(token)), email: row.Email}
+	err = r.sync(syncCtx)
+	switch {
+	case errors.Is(err, errDisconnected):
+		return nil // removed, disconnected or reconnected meanwhile: nothing of this run is kept
+	case err != nil:
 		log.Printf("gmail sync of %s: %v", row.Email, err)
-		return same.Updates(map[string]any{"sync_error": syncError(err), "lease_until": nil}).Error
+		return r.finish(map[string]any{"sync_error": syncError(err)})
 	}
-	return same.Updates(map[string]any{"history_id": history, "synced_at": time.Now(), "sync_error": "", "lease_until": nil}).Error
+	return r.finish(map[string]any{"synced_at": time.Now(), "sync_error": ""})
 }
 
-// sync records the mailbox's mail since history, or its last Backfill when there's no usable history,
-// and returns the history id to carry on from.
-func (s *Syncer) sync(ctx context.Context, m *mailbox, history *string) (string, error) {
-	var ids []string
-	var next string
-	var err error
-	if history != nil {
-		ids, next, err = m.since(ctx, *history)
+// errDisconnected stops a run whose mailbox is no longer the one it leased.
+var errDisconnected = errors.New("the mailbox was disconnected")
+
+// run is one sync of one mailbox.
+type run struct {
+	s   *Syncer
+	db  *gorm.DB
+	row connection
+	m   *mailbox
+}
+
+// save writes progress to the connection as it was leased, or fails with errDisconnected.
+func (r *run) save(fields map[string]any) error {
+	res := r.db.Model(&connection{}).Where("member_id = ? AND connected_at = ?", r.row.MemberID, r.row.ConnectedAt).Updates(fields)
+	if res.Error == nil && res.RowsAffected == 0 {
+		return errDisconnected
 	}
-	if history == nil || errors.Is(err, errHistoryGone) {
-		// Taken before listing, so nothing that arrives meanwhile is missed.
-		if next, err = m.historyID(ctx); err != nil {
-			return "", err
+	return res.Error
+}
+
+// finish saves the run's outcome and lets the lease go.
+func (r *run) finish(fields map[string]any) error {
+	fields["lease_until"] = nil
+	if err := r.save(fields); err != nil && !errors.Is(err, errDisconnected) {
+		return err
+	}
+	return nil
+}
+
+// stillConnected stops the run before it reads more of a mailbox that's gone.
+func (r *run) stillConnected() error {
+	var n int64
+	err := r.db.Model(&connection{}).Where("member_id = ? AND connected_at = ?", r.row.MemberID, r.row.ConnectedAt).Count(&n).Error
+	if err == nil && n == 0 {
+		return errDisconnected
+	}
+	return err
+}
+
+// guard runs first in the transaction recording an email: the member's row, then the mailbox's, the
+// order removing a member locks them in, so whichever comes second sees the other's outcome.
+func (r *run) guard(tx *gorm.DB) error {
+	var member, mailbox []string
+	if err := tx.Raw("SELECT id FROM members WHERE id = ? FOR KEY SHARE", r.row.MemberID).Scan(&member).Error; err != nil {
+		return err
+	}
+	if len(member) == 0 {
+		return errDisconnected
+	}
+	err := tx.Raw("SELECT member_id FROM gmail_connections WHERE member_id = ? AND connected_at = ? FOR SHARE",
+		r.row.MemberID, r.row.ConnectedAt).Scan(&mailbox).Error
+	if err == nil && len(mailbox) == 0 {
+		return errDisconnected
+	}
+	return err
+}
+
+// sync carries on the mailbox's backfill, or reads its history since the checkpoint; when Gmail no
+// longer has that history, it backfills again.
+func (r *run) sync(ctx context.Context) error {
+	if r.row.HistoryID != nil && r.row.BackfillHistory == nil {
+		err := r.history(ctx, *r.row.HistoryID)
+		if !errors.Is(err, errHistoryGone) {
+			return err
 		}
-		ids, err = m.recent(ctx, Backfill)
+		r.row.HistoryID = nil
 	}
-	if err != nil {
-		return "", err
+	return r.backfill(ctx)
+}
+
+// backfill reads the last Backfill of mail page by page, saving the next page after each, and moves the
+// checkpoint to where it started once it's done.
+func (r *run) backfill(ctx context.Context) error {
+	if r.row.BackfillHistory == nil {
+		// Taken before listing, so nothing that arrives meanwhile is missed.
+		start, err := r.m.historyID(ctx)
+		if err != nil {
+			return err
+		}
+		empty := ""
+		r.row.BackfillHistory, r.row.BackfillPage = &start, &empty
+		if err := r.save(map[string]any{"backfill_history": start, "backfill_page": "", "history_id": nil}); err != nil {
+			return err
+		}
 	}
+	page := ""
+	if r.row.BackfillPage != nil {
+		page = *r.row.BackfillPage
+	}
+	for {
+		ids, next, err := r.m.recent(ctx, Backfill, page)
+		if err != nil {
+			return err
+		}
+		if err := r.record(ctx, ids); err != nil {
+			return err
+		}
+		if next == "" {
+			return r.save(map[string]any{"history_id": *r.row.BackfillHistory, "backfill_history": nil, "backfill_page": nil})
+		}
+		if err := r.save(map[string]any{"backfill_page": next}); err != nil {
+			return err
+		}
+		page = next
+	}
+}
+
+// history reads what changed since the checkpoint page by page, moving the checkpoint after each page.
+func (r *run) history(ctx context.Context, from string) error {
+	page := ""
+	for {
+		ids, checkpoint, next, err := r.m.since(ctx, from, page)
+		if err != nil {
+			return err
+		}
+		if err := r.record(ctx, ids); err != nil {
+			return err
+		}
+		if checkpoint != "" {
+			if err := r.save(map[string]any{"history_id": checkpoint}); err != nil {
+				return err
+			}
+		}
+		if next == "" {
+			return nil
+		}
+		page = next
+	}
+}
+
+// record fetches each message and records those with a contact on them.
+func (r *run) record(ctx context.Context, ids []string) error {
 	for _, id := range ids {
-		msg, err := m.message(ctx, id)
+		if err := r.stillConnected(); err != nil {
+			return err
+		}
+		msg, err := r.m.message(ctx, id)
 		if errors.Is(err, errGone) {
 			continue // deleted since it was listed
 		}
 		if err != nil {
-			return "", err
+			return err
 		}
-		if t, ok := touchpointOf(msg, m.email); ok {
-			if _, err := s.record(ctx, t); err != nil {
-				return "", err
+		if t, ok := touchpointOf(msg, r.m.email); ok {
+			t.Guard = r.guard
+			if _, err := r.s.record(ctx, t); err != nil {
+				return err
 			}
 		}
 	}
-	return next, nil
+	return nil
 }
 
 func syncError(err error) string {
@@ -287,84 +408,82 @@ func (m *mailbox) historyID(ctx context.Context) (string, error) {
 	return profile.HistoryID, err
 }
 
-// recent lists the ids of messages from the last `back`.
-func (m *mailbox) recent(ctx context.Context, back time.Duration) ([]string, error) {
-	var ids []string
+// recent lists one page of the ids of messages from the last `back`, and the next page's token, or ""
+// on the last page.
+func (m *mailbox) recent(ctx context.Context, back time.Duration, pageToken string) ([]string, string, error) {
 	q := url.Values{"q": {fmt.Sprintf("newer_than:%dd", int(back.Hours()/24))}, "maxResults": {"500"}}
-	for {
-		var page struct {
-			Messages []struct {
-				ID string `json:"id"`
-			} `json:"messages"`
-			NextPageToken string `json:"nextPageToken"`
-		}
-		if err := m.get(ctx, "/messages", q, &page); err != nil {
-			return nil, err
-		}
-		for _, msg := range page.Messages {
-			ids = append(ids, msg.ID)
-		}
-		if page.NextPageToken == "" {
-			return ids, nil
-		}
-		q.Set("pageToken", page.NextPageToken)
+	if pageToken != "" {
+		q.Set("pageToken", pageToken)
 	}
+	var page struct {
+		Messages []struct {
+			ID string `json:"id"`
+		} `json:"messages"`
+		NextPageToken string `json:"nextPageToken"`
+	}
+	if err := m.get(ctx, "/messages", q, &page); err != nil {
+		return nil, "", err
+	}
+	ids := make([]string, 0, len(page.Messages))
+	for _, msg := range page.Messages {
+		ids = append(ids, msg.ID)
+	}
+	return ids, page.NextPageToken, nil
 }
 
-// since lists the ids of messages added after history, or taken out of spam or trash since (they were
-// skipped while there), and the history id to carry on from.
-func (m *mailbox) since(ctx context.Context, history string) ([]string, string, error) {
-	var ids []string
-	next := history
+// since lists one page of the messages added after history, or taken out of spam or trash since (they
+// were skipped while there), and the checkpoint to carry on from once they're recorded: the page's last
+// history record, or on the last page the mailbox's current history id.
+func (m *mailbox) since(ctx context.Context, history, pageToken string) (ids []string, checkpoint, next string, err error) {
 	q := url.Values{"startHistoryId": {history}, "historyTypes": {"messageAdded", "labelRemoved"}, "maxResults": {"500"}}
+	if pageToken != "" {
+		q.Set("pageToken", pageToken)
+	}
+	var page struct {
+		History []struct {
+			ID            string `json:"id"`
+			MessagesAdded []struct {
+				Message struct {
+					ID string `json:"id"`
+				} `json:"message"`
+			} `json:"messagesAdded"`
+			LabelsRemoved []struct {
+				Message struct {
+					ID string `json:"id"`
+				} `json:"message"`
+				LabelIDs []string `json:"labelIds"`
+			} `json:"labelsRemoved"`
+		} `json:"history"`
+		HistoryID     string `json:"historyId"`
+		NextPageToken string `json:"nextPageToken"`
+	}
+	err = m.get(ctx, "/history", q, &page)
+	if errors.Is(err, errGone) {
+		return nil, "", "", errHistoryGone
+	}
+	if err != nil {
+		return nil, "", "", err
+	}
 	add := func(id string) {
 		if !slices.Contains(ids, id) {
 			ids = append(ids, id)
 		}
 	}
-	for {
-		var page struct {
-			History []struct {
-				MessagesAdded []struct {
-					Message struct {
-						ID string `json:"id"`
-					} `json:"message"`
-				} `json:"messagesAdded"`
-				LabelsRemoved []struct {
-					Message struct {
-						ID string `json:"id"`
-					} `json:"message"`
-					LabelIDs []string `json:"labelIds"`
-				} `json:"labelsRemoved"`
-			} `json:"history"`
-			HistoryID     string `json:"historyId"`
-			NextPageToken string `json:"nextPageToken"`
+	for _, h := range page.History {
+		for _, added := range h.MessagesAdded {
+			add(added.Message.ID)
 		}
-		err := m.get(ctx, "/history", q, &page)
-		if errors.Is(err, errGone) {
-			return nil, "", errHistoryGone
-		}
-		if err != nil {
-			return nil, "", err
-		}
-		for _, h := range page.History {
-			for _, added := range h.MessagesAdded {
-				add(added.Message.ID)
-			}
-			for _, removed := range h.LabelsRemoved {
-				if slices.Contains(removed.LabelIDs, "SPAM") || slices.Contains(removed.LabelIDs, "TRASH") {
-					add(removed.Message.ID)
-				}
+		for _, removed := range h.LabelsRemoved {
+			if slices.Contains(removed.LabelIDs, "SPAM") || slices.Contains(removed.LabelIDs, "TRASH") {
+				add(removed.Message.ID)
 			}
 		}
-		if page.HistoryID != "" {
-			next = page.HistoryID
-		}
-		if page.NextPageToken == "" {
-			return ids, next, nil
-		}
-		q.Set("pageToken", page.NextPageToken)
+		checkpoint = h.ID
 	}
+	if page.NextPageToken == "" {
+		checkpoint = page.HistoryID
+	}
+	return ids, checkpoint, page.NextPageToken, nil
 }
 
 func (m *mailbox) message(ctx context.Context, id string) (message, error) {
