@@ -26,6 +26,8 @@ type Deps struct {
 	Sessions *auth.Sessions
 	DevUser  *auth.User
 	Deals    *deals.Store
+	// FathomKey turns on /api/integrations/fathom (docs/adr/0006); nil leaves it off.
+	FathomKey []byte
 }
 
 func NewRouter(d Deps) *gin.Engine {
@@ -49,6 +51,10 @@ func NewRouter(d Deps) *gin.Engine {
 	signedIn.POST("/deals/:id/notes", addNote(d.Deals))
 	registerCompanies(signedIn, d.Deals)
 	registerTeam(signedIn, d.Deals)
+
+	if d.FathomKey != nil {
+		r.POST("/api/integrations/fathom", limitBody(maxWebhookBytes), fathomWebhook(d.FathomKey, d.Deals))
+	}
 
 	r.NoRoute(frontend(d.Frontend))
 	return r

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/kthaisociety/business-crm/internal/auth"
+	"github.com/kthaisociety/business-crm/internal/fathom"
 )
 
 type Config struct {
@@ -31,6 +32,10 @@ type Config struct {
 	OIDCClientSecret string
 	PublicURL        string
 	SignInDomain     string
+
+	// FathomWebhookSecret checks that meetings posted to /api/integrations/fathom come from the team's
+	// Fathom webhook (docs/adr/0006): `whsec_` and base64, as Fathom shows it. Unset, the route is off.
+	FathomWebhookSecret string
 }
 
 func Load() *Config {
@@ -45,6 +50,8 @@ func Load() *Config {
 		OIDCClientSecret: strings.TrimSpace(getEnv("OIDC_CLIENT_SECRET", "")),
 		PublicURL:        strings.TrimRight(strings.TrimSpace(getEnv("PUBLIC_URL", "")), "/"),
 		SignInDomain:     strings.TrimSpace(getEnv("SIGN_IN_DOMAIN", "kthais.com")),
+
+		FathomWebhookSecret: strings.TrimSpace(getEnv("FATHOM_WEBHOOK_SECRET", "")),
 	}
 }
 
@@ -98,6 +105,11 @@ func (c *Config) Validate() error {
 	if len(missing) > 0 {
 		slices.Sort(missing)
 		return fmt.Errorf("missing required environment variables: %s", strings.Join(missing, ", "))
+	}
+	if c.FathomWebhookSecret != "" {
+		if _, err := fathom.Key(c.FathomWebhookSecret); err != nil {
+			return fmt.Errorf("FATHOM_WEBHOOK_SECRET: %w", err)
+		}
 	}
 	if c.OIDC() != nil && c.DevUserEmail != "" {
 		return fmt.Errorf("DEV_USER_EMAIL and an OIDC client are both set: unset DEV_USER_EMAIL to sign in for real (docs/pcr/0007)")

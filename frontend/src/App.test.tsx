@@ -952,6 +952,16 @@ test('an admin hands over to a new head of business, and steps down to board', a
   expect(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Reports' })).toBeInTheDocument()
 })
 
+test('a Fathom meeting shows its summary, action items and a link to the recording', async () => {
+  await renderApp()
+  const drawer = open('Fjällbacka Ventures')
+
+  const meeting = within(drawer).getByText('Intro call').closest('li')!
+  expect(meeting).toHaveTextContent('via Fathom')
+  expect(meeting).toHaveTextContent('Prefer an evening format')
+  expect(within(meeting).getByRole('link', { name: 'Open recording' })).toHaveAttribute('href', 'https://fathom.video/share/made-up')
+})
+
 test('a role change the server refuses shows why', async () => {
   api.fail('PATCH', /^\/api\/members\//, 409, 'the team needs at least one admin')
   renderAt('/team')

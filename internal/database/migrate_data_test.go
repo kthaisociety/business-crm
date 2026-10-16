@@ -134,3 +134,33 @@ func TestMemberRolesMigrationMergesEmailsThatDifferOnlyInCase(t *testing.T) {
 	require.NoError(t, db.Raw(`SELECT member_id FROM deal_support ORDER BY member_id`).Scan(&support).Error)
 	assert.Equal(t, []string{keep, "a0000000-0000-0000-0000-000000000003"}, support)
 }
+
+// 00005 lets one meeting sit on several deals. Rolling it back would have to drop all but one of them,
+// so it refuses while any exist, and leaves every deal's timeline as it was.
+func TestTouchpointsMigrationRollsBackOnlyWithoutSharedTouchpoints(t *testing.T) {
+	ctx := context.Background()
+	db := databasetest.OpenEmpty(t)
+	all := migrationsUpTo(t, "00001_create_deals.sql", "00002_create_companies_and_contacts.sql",
+		"00003_add_member_roles.sql", "00004_create_sessions.sql", "00005_touchpoints_from_integrations.sql")
+	require.NoError(t, database.MigrateFS(ctx, db, all))
+	exec := func(sql string) { require.NoError(t, db.Exec(sql).Error) }
+	exec(`INSERT INTO companies (id, name) VALUES ('c0000000-0000-0000-0000-000000000001', 'Granit')`)
+	exec(`INSERT INTO deals (id, company_id, deal_type, semester) VALUES
+		('d0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000001', 'Event', 'HT 2026'),
+		('d0000000-0000-0000-0000-000000000002', 'c0000000-0000-0000-0000-000000000001', 'Event', 'VT 2027')`)
+	exec(`INSERT INTO activities (deal_id, type, source, external_id, title) VALUES
+		('d0000000-0000-0000-0000-000000000001', 'meeting', 'fathom', '42', 'Planning'),
+		('d0000000-0000-0000-0000-000000000002', 'meeting', 'fathom', '42', 'Planning')`)
+
+	err := database.DownFS(ctx, db, all)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "several deals")
+	var meetings int64
+	require.NoError(t, db.Raw(`SELECT count(*) FROM activities`).Scan(&meetings).Error)
+	assert.Equal(t, int64(2), meetings, "both deals keep the meeting")
+
+	exec(`DELETE FROM activities WHERE deal_id = 'd0000000-0000-0000-0000-000000000002'`)
+	require.NoError(t, database.DownFS(ctx, db, all))
+	assertNoColumn(t, db, "activities", "url")
+}

@@ -21,7 +21,8 @@ the API under `/api` and an embedded Vite + React frontend everywhere else.
 - `internal/config`: env, validated at boot
 - `internal/auth`: who is signed in: OIDC sign-in and sessions (ADR 0004), or the dev user (PCR 0007);
   `auth/authtest` is a fake OIDC provider for tests
-- `internal/deals`: the deal log: GORM models, validation and queries
+- `internal/deals`: the deal log: GORM models, validation and queries; `Record` puts synced emails and meetings on deals
+- `internal/fathom`: Fathom's meeting webhook: signature and payload (ADR 0006)
 - `internal/handlers`: `/api` routes, and the frontend for every other path
 - `internal/database`: Postgres connection and migrations (`migrations/*.sql`, applied at startup)
 - `frontend/`: the frontend (Vite, React, TypeScript, Tailwind); `frontend/embed.go` embeds `frontend/dist`
