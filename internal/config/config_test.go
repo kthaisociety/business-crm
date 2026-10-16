@@ -80,3 +80,12 @@ func TestOIDCNeedsHTTPSExceptOnThisMachine(t *testing.T) {
 	t.Setenv("PUBLIC_URL", "http://127.0.0.1:5174")
 	assert.NoError(t, Load().Validate())
 }
+
+func TestAFathomSecretMustBeFathoms(t *testing.T) {
+	setRequired(t)
+	t.Setenv("FATHOM_WEBHOOK_SECRET", "not-a-secret")
+	assert.ErrorContains(t, Load().Validate(), "FATHOM_WEBHOOK_SECRET")
+
+	t.Setenv("FATHOM_WEBHOOK_SECRET", "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw")
+	assert.NoError(t, Load().Validate())
+}

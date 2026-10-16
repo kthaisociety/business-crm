@@ -386,6 +386,17 @@ export default function DealDetailDrawer({
                         ))}
                       </ul>
                     )}
+                    {/* Only https: a synced link is never a javascript: or other scheme. */}
+                    {activity.url?.startsWith('https://') && (
+                      <a
+                        href={activity.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 inline-block text-[11px] font-semibold text-indigo-700 hover:underline"
+                      >
+                        {activity.type === 'meeting' ? 'Open recording' : 'Open in Gmail'}
+                      </a>
+                    )}
                   </li>
                 )
               })}

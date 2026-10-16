@@ -20,6 +20,7 @@ import (
 	"github.com/kthaisociety/business-crm/internal/config"
 	"github.com/kthaisociety/business-crm/internal/database"
 	"github.com/kthaisociety/business-crm/internal/deals"
+	"github.com/kthaisociety/business-crm/internal/fathom"
 	"github.com/kthaisociety/business-crm/internal/handlers"
 )
 
@@ -68,6 +69,10 @@ func main() {
 		Frontend: frontend.Dist(),
 		DevUser:  cfg.DevUser(),
 		Deals:    deals.NewStore(db),
+	}
+	if cfg.FathomWebhookSecret != "" {
+		deps.FathomKey, _ = fathom.Key(cfg.FathomWebhookSecret) // checked by Validate
+		log.Printf("taking Fathom meetings at /api/integrations/fathom (docs/adr/0006)")
 	}
 	if oidc != nil {
 		deps.OIDC, deps.Sessions = oidc, auth.NewSessions(db, cfg.PublicURL)

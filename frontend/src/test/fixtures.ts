@@ -77,7 +77,8 @@ const rawDeals: RawDeal[] = [
       {
         id: 'fjallbacka-1',
         type: 'meeting',
-        source: 'manual',
+        source: 'fathom',
+        url: 'https://fathom.video/share/made-up',
         title: 'Intro call',
         timestamp: daysAgo(6),
         body: 'Good fit; they want visibility with founders.',

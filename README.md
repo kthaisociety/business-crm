@@ -61,6 +61,24 @@ to board or member. The command refuses while the team has an admin; `-force` is
 admin has left without handing over ([ADR 0005](docs/adr/0005-appoint-the-first-admin-once.md)). Locally,
 `go run ./cmd/seed` already makes the dev user an admin.
 
+## Fathom meetings
+
+Finished Fathom meetings with a contact among the invitees land on the timeline of that company's open
+deals (or its latest deal), with Fathom's summary, action items and a link to the recording
+([ADR 0006](docs/adr/0006-email-and-meeting-touchpoints.md)). Meetings with no contact are dropped.
+
+To connect it, one person on the team's Fathom workspace adds a webhook (Settings, API Access, Add
+Webhook):
+
+- Destination URL: `PUBLIC_URL/api/integrations/fathom`
+- Triggered for: their own recordings and **shared team recordings**, so the whole team's meetings come
+  through one webhook. Meetings must be shared with the team in Fathom to be seen.
+- Include: summary and action items (no transcript)
+
+Then set `FATHOM_WEBHOOK_SECRET` to the secret Fathom shows. Fathom can't reach a laptop, so locally
+this is tried with test meetings through a tunnel, never real meetings with companies
+([PCR 0007](docs/pcr/0007-real-sign-in-dev-user-for-local-work.md)).
+
 ## Database
 
 The schema is SQL files in `internal/database/migrations/`, applied by the server at startup
@@ -74,6 +92,7 @@ The schema is SQL files in `internal/database/migrations/`, applied by the serve
 | `GET /auth/login` | starts signing in: redirects to the OIDC provider |
 | `GET /auth/callback` | finishes signing in, and redirects to `/`, or to `/?sign-in=not-on-team`, `domain` or `failed` |
 | `POST /auth/logout` | signs this browser out: 204 |
+| `POST /api/integrations/fathom` | Fathom's webhook: a finished meeting, signed with `FATHOM_WEBHOOK_SECRET` (401 otherwise); 204. Off without the secret |
 | `GET /api/me` | the signed-in user and who they are on the team: `{sub, email, name, memberId, role, canSignOut}`; 401 if no one is signed in |
 | `GET /api/deals` | every deal, with company, contact, owner, support and timeline |
 | `GET /api/deals/:id` | one deal, the same way |
@@ -100,6 +119,7 @@ All from env, read by the Go server ([PCR 0001](docs/pcr/0001-config-from-env.md
 | `OIDC_ISSUER` | no | default `https://accounts.google.com`; identity-service's URL once it's live |
 | `PUBLIC_URL` | no | where the app is served; the callback is `PUBLIC_URL/auth/callback`. https, except on 127.0.0.1 or localhost |
 | `SIGN_IN_DOMAIN` | no | the email domain that may sign in, default `kthais.com` |
+| `FATHOM_WEBHOOK_SECRET` | yes | the team's Fathom webhook secret, `whsec_…`; turns on `/api/integrations/fathom` ([ADR 0006](docs/adr/0006-email-and-meeting-touchpoints.md)) |
 | `DEV_USER_EMAIL` | no | without an OIDC client, signs every request in as this user; local work only ([PCR 0007](docs/pcr/0007-real-sign-in-dev-user-for-local-work.md)) |
 | `HOST`, `PORT` | no | default all interfaces, `8000` |
 

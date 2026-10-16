@@ -79,6 +79,7 @@ type Activity struct {
 	Title        string
 	Body         string
 	BulletPoints []string `gorm:"serializer:json"`
+	URL          string // where a synced touchpoint came from: the recording, the email (docs/adr/0006)
 	OccurredAt   time.Time
 	CreatedAt    time.Time
 }
@@ -147,6 +148,7 @@ type ActivityView struct {
 	Timestamp    string   `json:"timestamp"`
 	Body         string   `json:"body"`
 	BulletPoints []string `json:"bulletPoints,omitempty"`
+	URL          string   `json:"url,omitempty"`
 }
 
 type View struct {
@@ -197,6 +199,7 @@ func viewOfActivity(a Activity) ActivityView {
 		Timestamp:    a.OccurredAt.UTC().Format(time.RFC3339),
 		Body:         a.Body,
 		BulletPoints: a.BulletPoints,
+		URL:          a.URL,
 	}
 }
 

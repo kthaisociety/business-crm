@@ -62,12 +62,14 @@ export type Contact = { id: string; companyId: string; name: string; email: stri
 export type Activity = {
   id: string
   type: 'email' | 'meeting' | 'note'
-  // Where the entry came from. Email sync and Fathom meeting notes will add entries of their own.
+  // Where the entry came from: email sync and Fathom add entries of their own (docs/adr/0006).
   source: 'manual' | 'email_sync' | 'fathom'
   title: string
   timestamp: string
   body: string
   bulletPoints?: string[]
+  // A synced entry's origin: the Fathom recording, or the email in Gmail.
+  url?: string
 }
 
 export type Deal = {
