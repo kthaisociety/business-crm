@@ -1055,6 +1055,16 @@ test('when Google withdraws access, the member is asked to reconnect', async () 
   expect(within(screen.getByRole('complementary')).getByRole('link', { name: 'Reconnect Gmail' })).toBeInTheDocument()
 })
 
+test('the board says when a company is waiting on our reply', async () => {
+  const deal = api.deals.find((d) => d.id === 'fjallbacka')!
+  deal.activities = deal.activities.filter((a) => a.type === 'email')
+  await renderApp()
+
+  expect(within(card('Fjällbacka Ventures')).getByText('Clara replied 3 days ago: your turn')).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Needs follow-up' }))
+  expect(card('Fjällbacka Ventures')).toBeInTheDocument()
+})
+
 test('Team shows who has connected Gmail', async () => {
   api = stubApi({ gmail: 'connected' })
   renderAt('/team')

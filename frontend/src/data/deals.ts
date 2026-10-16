@@ -106,6 +106,9 @@ export const DAY = 24 * 60 * 60 * 1000
 
 // A deal with no touchpoint for this many days gets a follow-up nudge.
 export const FOLLOW_UP_AFTER_DAYS = 4
+// After an email (docs/adr/0006): how long their email waits for our reply, and ours for theirs.
+export const YOUR_TURN_AFTER_DAYS = 2
+export const NO_REPLY_AFTER_DAYS = 5
 
 export const isOpen = (deal: Deal) => deal.status !== 'finished' && deal.status !== 'canceled'
 
@@ -128,18 +131,39 @@ export function calendarDaysBetween(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY)
 }
 
-export type Nudge = { kind: 'overdue' | 'inactive'; days: number }
+// Why an open deal needs attention. After an email, `who` is the contact's first name (null without a
+// contact), for "Lina replied 2 days ago".
+export type Nudge =
+  | { kind: 'overdue' | 'inactive'; days: number }
+  | { kind: 'your-turn' | 'no-reply'; days: number; who: string | null }
 
-// Why an open deal needs attention, if it does: an overdue next step comes first, then inactivity.
+// Why an open deal needs attention, if it does: one nudge, the first that applies (docs/adr/0006).
+// 1. An overdue next step.
+// 2. Their email is the latest touchpoint, unanswered for YOUR_TURN_AFTER_DAYS: our turn.
+// 3. Our email is the latest touchpoint, unanswered for NO_REPLY_AFTER_DAYS. Until then nothing: we're
+//    waiting on them, so the inactivity nudge doesn't apply.
+// 4. Otherwise (a note, a meeting or nothing last: nobody owes a reply), no touchpoint for
+//    FOLLOW_UP_AFTER_DAYS.
 export function nudgeFor(deal: Deal, now = Date.now()): Nudge | null {
   if (!isOpen(deal)) return null
   const todayDate = today(new Date(now))
   if (deal.nextStepDue && deal.nextStepDue < todayDate) {
     return { kind: 'overdue', days: calendarDaysBetween(deal.nextStepDue, todayDate) }
   }
-  const last = lastTouchpoint(deal)
-  const idle = last ? daysSince(last, now) : 0
+  const latest = latestActivity(deal)
+  const idle = latest ? daysSince(latest.timestamp, now) : 0
+  if (latest?.type === 'email' && latest.direction) {
+    const who = deal.contact?.name.trim().split(/\s+/)[0] || null
+    if (latest.direction === 'received') {
+      return idle >= YOUR_TURN_AFTER_DAYS ? { kind: 'your-turn', days: idle, who } : null
+    }
+    return idle >= NO_REPLY_AFTER_DAYS ? { kind: 'no-reply', days: idle, who } : null
+  }
   return idle >= FOLLOW_UP_AFTER_DAYS ? { kind: 'inactive', days: idle } : null
+}
+
+function latestActivity(deal: Deal): Activity | null {
+  return deal.activities.reduce<Activity | null>((latest, a) => (!latest || a.timestamp > latest.timestamp ? a : latest), null)
 }
 
 // Signed or finished: the company has committed to the fee.

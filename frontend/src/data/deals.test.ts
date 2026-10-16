@@ -59,3 +59,53 @@ test('the current semester is VT from January and HT from July', () => {
   expect(currentSemester(new Date(2026, 6, 1))).toBe('HT 2026')
   expect(currentSemester(new Date(2026, 11, 31))).toBe('HT 2026')
 })
+
+// Emails say whose turn it is (docs/adr/0006): one nudge per deal, in this order.
+const email = (direction: 'sent' | 'received', timestamp: string) => ({
+  id: `e-${timestamp}`,
+  type: 'email' as const,
+  source: 'email_sync' as const,
+  direction,
+  title: 'Re: Lunch lecture',
+  body: '',
+  timestamp,
+})
+const note = (timestamp: string) => ({ id: `n-${timestamp}`, type: 'note' as const, source: 'manual' as const, title: '', body: '', timestamp })
+const withContact = (activities: Deal['activities']) =>
+  deal({ contact: { id: 'p-lina', companyId: 'c-granit', name: 'Lina Dahl', email: 'lina.dahl@example.com', role: '' }, activities })
+
+test('their email unanswered for 2 days: your turn', () => {
+  expect(nudgeFor(withContact([email('received', '2026-10-12T12:00:00')]), now)).toBeNull()
+  expect(nudgeFor(withContact([email('received', '2026-10-11T12:00:00')]), now)).toEqual({ kind: 'your-turn', days: 2, who: 'Lina' })
+})
+
+test('our email unanswered for 5 days: no reply, and no inactivity nudge before then', () => {
+  expect(nudgeFor(withContact([email('sent', '2026-10-09T12:00:00')]), now)).toBeNull()
+  expect(nudgeFor(withContact([email('sent', '2026-10-08T12:00:00')]), now)).toEqual({ kind: 'no-reply', days: 5, who: 'Lina' })
+})
+
+test('only the latest touchpoint counts: a reply, a note or a meeting after an email', () => {
+  const sent = email('sent', '2026-10-01T12:00:00')
+  expect(nudgeFor(withContact([sent, email('received', '2026-10-12T12:00:00')]), now)).toBeNull()
+  // A note after their email: nobody owes a reply, so it's the 4-day inactivity rule from the note.
+  expect(nudgeFor(withContact([email('received', '2026-10-01T12:00:00'), note('2026-10-12T12:00:00')]), now)).toBeNull()
+  expect(nudgeFor(withContact([email('received', '2026-10-01T12:00:00'), note('2026-10-08T12:00:00')]), now)).toEqual({
+    kind: 'inactive',
+    days: 5,
+  })
+})
+
+test('an overdue next step still comes first', () => {
+  expect(nudgeFor({ ...withContact([email('received', '2026-10-01T12:00:00')]), nextStepDue: '2026-10-12' }, now)).toEqual({
+    kind: 'overdue',
+    days: 1,
+  })
+})
+
+test('without a contact, the nudge says "they"', () => {
+  expect(nudgeFor(deal({ contact: null, activities: [email('received', '2026-10-10T12:00:00')] }), now)).toEqual({
+    kind: 'your-turn',
+    days: 3,
+    who: null,
+  })
+})

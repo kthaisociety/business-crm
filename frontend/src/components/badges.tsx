@@ -1,4 +1,4 @@
-import { AlertTriangle, Clock } from 'lucide-react'
+import { AlertTriangle, Clock, Mail } from 'lucide-react'
 import type { Deal, DealType, Nudge } from '../data/deals'
 import { invoiceLabel } from '../data/deals'
 
@@ -16,19 +16,33 @@ export function DealTypeBadge({ dealType }: { dealType: DealType }) {
   )
 }
 
+const days = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`
+
+// What each nudge says. Our turn (overdue, their email waiting) is red; waiting on them, amber.
+function nudgeText(nudge: Nudge): string {
+  switch (nudge.kind) {
+    case 'overdue':
+      return `Next step overdue: ${days(nudge.days)}`
+    case 'your-turn':
+      return `${nudge.who ?? 'They'} replied ${days(nudge.days)} ago: your turn`
+    case 'no-reply':
+      return nudge.who ? `No reply from ${nudge.who} for ${days(nudge.days)}` : `No reply for ${days(nudge.days)}`
+    case 'inactive':
+      return `Follow-up due: ${nudge.days} days inactive`
+  }
+}
+
 export function NudgeBadge({ nudge }: { nudge: Nudge }) {
-  const overdue = nudge.kind === 'overdue'
-  const Icon = overdue ? Clock : AlertTriangle
+  const urgent = nudge.kind === 'overdue' || nudge.kind === 'your-turn'
+  const Icon = nudge.kind === 'overdue' ? Clock : nudge.kind === 'inactive' ? AlertTriangle : Mail
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-semibold ${
-        overdue ? 'border-red-200 bg-red-50 text-red-700' : 'border-amber-200 bg-amber-50 text-amber-800'
+        urgent ? 'border-red-200 bg-red-50 text-red-700' : 'border-amber-200 bg-amber-50 text-amber-800'
       }`}
     >
       <Icon size={12} aria-hidden />
-      {overdue
-        ? `Next step overdue: ${nudge.days} ${nudge.days === 1 ? 'day' : 'days'}`
-        : `Follow-up due: ${nudge.days} days inactive`}
+      {nudgeText(nudge)}
     </span>
   )
 }
