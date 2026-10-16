@@ -33,8 +33,8 @@ type OIDCConfig struct {
 }
 
 // OIDC runs the authorization code flow with PKCE: Begin sends the browser to the provider, Finish takes
-// the code it comes back with and returns who signed in. Between the two, a short-lived signed cookie
-// holds the state, nonce and PKCE verifier.
+// the code it comes back with and returns who signed in. Between the two, a short-lived signed cookie per
+// sign-in holds its state, nonce and PKCE verifier, so sign-ins in two tabs don't trip each other up.
 type OIDC struct {
 	cfg      OIDCConfig
 	oauth    oauth2.Config
@@ -94,12 +94,25 @@ type flow struct {
 
 const flowTTL = 10 * time.Minute
 
+// providerTimeout bounds Finish's calls to the provider (the token exchange, and its keys if they
+// changed), so a provider that stops answering fails the sign-in instead of holding it open.
+var providerTimeout = 15 * time.Second
+
+// flowCookieName is the cookie for the sign-in with this state: part of the state is enough to tell
+// sign-ins apart, and Finish still checks the whole of it.
+func flowCookieName(state string) string {
+	if len(state) > 16 {
+		state = state[:16]
+	}
+	return flowCookie + "_" + state
+}
+
 // Begin starts a sign-in: it sets the flow cookie and returns the provider's URL to send the browser to.
 func (o *OIDC) Begin(w http.ResponseWriter) string {
 	f := flow{State: randomString(), Nonce: randomString(), Verifier: oauth2.GenerateVerifier(), Expires: time.Now().Add(flowTTL).Unix()}
 	payload, _ := json.Marshal(f)
 	value := base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(o.sign(payload))
-	http.SetCookie(w, o.cookie.new(flowCookie, value, flowTTL))
+	http.SetCookie(w, o.cookie.new(flowCookieName(f.State), value, flowTTL))
 
 	opts := []oauth2.AuthCodeOption{oidc.Nonce(f.Nonce), oauth2.S256ChallengeOption(f.Verifier)}
 	if o.cfg.Google {
@@ -111,12 +124,15 @@ func (o *OIDC) Begin(w http.ResponseWriter) string {
 
 // Finish completes a sign-in from the provider's redirect back to this app, and clears the flow cookie.
 func (o *OIDC) Finish(w http.ResponseWriter, r *http.Request) (User, error) {
-	http.SetCookie(w, o.cookie.clear(flowCookie))
-	f, err := o.readFlow(r)
+	q := r.URL.Query()
+	name := flowCookieName(q.Get("state"))
+	http.SetCookie(w, o.cookie.clear(name))
+	f, err := o.readFlow(r, name)
 	if err != nil {
 		return User{}, &SignInError{ReasonFailed, err}
 	}
-	q := r.URL.Query()
+	ctx, cancel := context.WithTimeout(r.Context(), providerTimeout)
+	defer cancel()
 	if e := q.Get("error"); e != "" {
 		return User{}, &SignInError{ReasonFailed, fmt.Errorf("provider: %s", e)}
 	}
@@ -124,7 +140,7 @@ func (o *OIDC) Finish(w http.ResponseWriter, r *http.Request) (User, error) {
 		return User{}, &SignInError{ReasonFailed, errors.New("state doesn't match")}
 	}
 
-	token, err := o.oauth.Exchange(r.Context(), q.Get("code"), oauth2.VerifierOption(f.Verifier))
+	token, err := o.oauth.Exchange(ctx, q.Get("code"), oauth2.VerifierOption(f.Verifier))
 	if err != nil {
 		return User{}, &SignInError{ReasonFailed, fmt.Errorf("exchanging the code: %w", err)}
 	}
@@ -133,7 +149,7 @@ func (o *OIDC) Finish(w http.ResponseWriter, r *http.Request) (User, error) {
 		return User{}, &SignInError{ReasonFailed, errors.New("no id_token in the token response")}
 	}
 	// Checks the signature, issuer, audience and expiry.
-	idToken, err := o.verifier.Verify(r.Context(), raw)
+	idToken, err := o.verifier.Verify(ctx, raw)
 	if err != nil {
 		return User{}, &SignInError{ReasonFailed, fmt.Errorf("verifying the id_token: %w", err)}
 	}
@@ -162,9 +178,9 @@ func (o *OIDC) Finish(w http.ResponseWriter, r *http.Request) (User, error) {
 	return User{Subject: idToken.Subject, Email: email, Name: claims.Name}, nil
 }
 
-func (o *OIDC) readFlow(r *http.Request) (flow, error) {
+func (o *OIDC) readFlow(r *http.Request, name string) (flow, error) {
 	var f flow
-	c, err := r.Cookie(o.cookie.name(flowCookie))
+	c, err := r.Cookie(o.cookie.name(name))
 	if err != nil {
 		return f, errors.New("no sign-in in progress in this browser")
 	}

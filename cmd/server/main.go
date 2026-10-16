@@ -64,6 +64,7 @@ func main() {
 	}
 	if oidc != nil {
 		deps.OIDC, deps.Sessions = oidc, auth.NewSessions(db, cfg.PublicURL)
+		deps.Deals.OnlyTeamMembers()
 	}
 	router := handlers.NewRouter(deps)
 

@@ -222,3 +222,46 @@ func TestTeamChangesDoNotDeadlockWithNewLeads(t *testing.T) {
 	require.NoError(t, lead.Commit().Error)
 	assert.NoError(t, <-changed)
 }
+
+// With real sign-in (docs/adr/0004), someone removed from the team while signing in, or while a request
+// of theirs is under way, stays removed: nothing but an admin adds them back.
+func TestARemovedMemberStaysRemoved(t *testing.T) {
+	db := databasetest.Open(t)
+	s := deals.NewStore(db).OnlyTeamMembers()
+	ctx := context.Background()
+	maja := auth.User{Subject: "maja", Email: "maja@example.com", Name: "Maja Holm"}
+	m, err := s.AddMember(ctx, deals.MemberInput{Email: maja.Email, Name: maja.Name})
+	require.NoError(t, err)
+
+	// An admin's removal is under way when Maja's sign-in checks the team.
+	removal := db.Begin()
+	defer removal.Rollback()
+	require.NoError(t, removal.Exec("DELETE FROM members WHERE id = ?", m.ID).Error)
+	admitted := make(chan error, 1)
+	go func() {
+		_, err := s.Admit(ctx, maja)
+		admitted <- err
+	}()
+	require.Eventually(t, func() bool {
+		var waiting int64
+		db.Raw("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()").Scan(&waiting)
+		return waiting > 0
+	}, 5*time.Second, 10*time.Millisecond, "the sign-in waits for the removal")
+	require.NoError(t, removal.Commit().Error)
+
+	assert.ErrorIs(t, <-admitted, deals.ErrNotOnTeam)
+	_, err = s.SignIn(ctx, maja)
+	assert.ErrorIs(t, err, deals.ErrNotOnTeam, "a request already under way doesn't add her back either")
+	team, err := s.ListMembers(ctx)
+	require.NoError(t, err)
+	assert.Empty(t, team)
+}
+
+func TestOnlyTeamMembersStillLetsAdminEmailsIn(t *testing.T) {
+	s := deals.NewStore(databasetest.Open(t), "maja@example.com").OnlyTeamMembers()
+
+	me, err := s.Admit(context.Background(), auth.User{Email: "Maja@example.com", Name: "Maja Holm"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "admin", me.Role)
+}

@@ -391,7 +391,7 @@ export default function App() {
         canAddLead={user !== null && data !== null}
         onNewLead={() => setAddingLead(true)}
       />
-      <MobileNav user={user} />
+      <MobileNav user={user} onSignOut={() => void leave()} />
       <div className="flex min-h-0 flex-1">
         <Sidebar user={user} userError={userError} onSignOut={() => void leave()} />
         <main className="flex min-w-0 flex-1 flex-col">

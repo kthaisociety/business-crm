@@ -41,7 +41,7 @@ func newSignInApp(t *testing.T, adminEmails ...string) *signInApp {
 	})
 	require.NoError(t, err)
 	db := databasetest.Open(t)
-	store := deals.NewStore(db, adminEmails...)
+	store := deals.NewStore(db, adminEmails...).OnlyTeamMembers()
 	router := NewRouter(Deps{
 		PingDB:   func(context.Context) error { return nil },
 		Frontend: builtUI,
@@ -196,6 +196,25 @@ func TestATokenFromAnotherSignInIsRefused(t *testing.T) {
 
 	assert.Equal(t, "/?sign-in=failed", b.signIn(who))
 	assert.Equal(t, http.StatusUnauthorized, b.do(http.MethodGet, "/api/me").Code)
+}
+
+func TestSignInsInTwoTabsBothWork(t *testing.T) {
+	app := newSignInApp(t, "maja@example.com")
+	app.provider.SignsIn(maja())
+	b := app.browser(t)
+	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	backFrom := func() string {
+		w := b.do(http.MethodGet, "/auth/login")
+		resp, err := noFollow.Get(w.Header().Get("Location"))
+		require.NoError(t, err)
+		resp.Body.Close()
+		back, _ := url.Parse(resp.Header.Get("Location"))
+		return back.RequestURI()
+	}
+	first, second := backFrom(), backFrom()
+
+	assert.Equal(t, "/", b.do(http.MethodGet, first).Header().Get("Location"))
+	assert.Equal(t, "/", b.do(http.MethodGet, second).Header().Get("Location"))
 }
 
 // A callback must finish a sign-in this browser started: otherwise someone could sign a victim's browser

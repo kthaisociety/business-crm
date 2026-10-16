@@ -69,10 +69,19 @@ test('signing out shows the sign-in page', async () => {
   api = stubApi({ signedIn: true })
   await renderApp()
 
-  fireEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+  fireEvent.click(within(screen.getByRole('complementary')).getByRole('button', { name: 'Sign out' }))
 
   expect(await screen.findByRole('link', { name: 'Sign in with Google' })).toBeInTheDocument()
   expect(api.requests.some((r) => r.method === 'POST' && r.path === '/auth/logout')).toBe(true)
+})
+
+test('phones can sign out too', async () => {
+  api = stubApi({ signedIn: true })
+  await renderApp()
+
+  fireEvent.click(within(screen.getByRole('navigation', { name: 'Pages' })).getByRole('button', { name: 'Sign out' }))
+
+  expect(await screen.findByRole('link', { name: 'Sign in with Google' })).toBeInTheDocument()
 })
 
 test('the dev user has no sign-out', async () => {

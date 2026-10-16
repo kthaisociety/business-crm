@@ -63,7 +63,7 @@ export default function Sidebar({ user, userError, onSignOut }: Props) {
 }
 
 // The sidebar is hidden on narrow screens; this row of tabs takes its place.
-export function MobileNav({ user }: { user: User | null }) {
+export function MobileNav({ user, onSignOut }: { user: User | null; onSignOut: () => void }) {
   return (
     <nav aria-label="Pages" className="flex gap-1 overflow-x-auto border-b border-gray-200 bg-white px-4 py-2 md:hidden">
       {pagesFor(user).map(({ label, path }) => (
@@ -78,6 +78,11 @@ export function MobileNav({ user }: { user: User | null }) {
           {label}
         </NavLink>
       ))}
+      {user?.canSignOut && (
+        <button type="button" onClick={onSignOut} className="ml-auto shrink-0 rounded-md px-2.5 py-1 text-xs text-gray-600">
+          Sign out
+        </button>
+      )}
     </nav>
   )
 }

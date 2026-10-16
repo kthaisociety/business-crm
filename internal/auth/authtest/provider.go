@@ -43,9 +43,11 @@ type Provider struct {
 	t   *testing.T
 	key *rsa.PrivateKey
 
-	mu    sync.Mutex
-	next  Claims
-	codes map[string]grant
+	mu      sync.Mutex
+	next    Claims
+	codes   map[string]grant
+	stalled bool
+	stop    chan struct{} // closed when the test ends, releasing stalled requests
 }
 
 type grant struct {
@@ -58,7 +60,7 @@ func NewProvider(t *testing.T) *Provider {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	require.NoError(t, err)
-	p := &Provider{t: t, key: key, codes: map[string]grant{}}
+	p := &Provider{t: t, key: key, codes: map[string]grant{}, stop: make(chan struct{})}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /.well-known/openid-configuration", p.discovery)
 	mux.HandleFunc("GET /jwks", p.jwks)
@@ -66,6 +68,7 @@ func NewProvider(t *testing.T) *Provider {
 	mux.HandleFunc("POST /token", p.token)
 	p.Server = httptest.NewServer(mux)
 	t.Cleanup(p.Close)
+	t.Cleanup(func() { close(p.stop) }) // cleanups run last first: this before Close
 	return p
 }
 
@@ -74,6 +77,13 @@ func (p *Provider) SignsIn(c Claims) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.next = c
+}
+
+// Stalls makes the token endpoint stop answering: requests to it hang until the caller gives up.
+func (p *Provider) Stalls() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.stalled = true
 }
 
 func (p *Provider) discovery(w http.ResponseWriter, _ *http.Request) {
@@ -109,6 +119,16 @@ func (p *Provider) authorize(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Provider) token(w http.ResponseWriter, r *http.Request) {
+	p.mu.Lock()
+	stalled := p.stalled
+	p.mu.Unlock()
+	if stalled {
+		select {
+		case <-r.Context().Done():
+		case <-p.stop:
+		}
+		return
+	}
 	id, secret, ok := r.BasicAuth()
 	if !ok {
 		id, secret = r.FormValue("client_id"), r.FormValue("client_secret")
