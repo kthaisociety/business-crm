@@ -93,6 +93,14 @@ func TestParseReadsWhatTheCRMKeeps(t *testing.T) {
 	assert.Equal(t, []string{"Send the invoice with 30-day terms"}, m.ActionItems)
 }
 
+// Fathom's real summaries link most lines to their moment in the recording, with bold inside the link,
+// and escape some characters.
+func TestPlainTextReadsFathomsLinkedLines(t *testing.T) {
+	markdown := "## Key Takeaways\n\n  - [**Instant review:** Recordings are ready in \\~5 seconds.](https://fathom.video/share/x?timestamp=337.0)\n  - [Plain line](https://fathom.video/share/x)"
+
+	assert.Equal(t, "Key Takeaways\n\n- Instant review: Recordings are ready in ~5 seconds.\n- Plain line", plainText(markdown))
+}
+
 func TestParseFallsBackToTheCalendarTitle(t *testing.T) {
 	m, err := Parse([]byte(`{"recording_id": 7, "title": " ", "meeting_title": "Intro call"}`))
 	require.NoError(t, err)

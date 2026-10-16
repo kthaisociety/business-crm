@@ -32,7 +32,7 @@ func fathomWebhook(key []byte, store *deals.Store) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		added, err := store.Record(c.Request.Context(), deals.Touchpoint{
+		recorded, err := store.Record(c.Request.Context(), deals.Touchpoint{
 			Type:         "meeting",
 			Source:       "fathom",
 			ExternalID:   meeting.RecordingID,
@@ -48,8 +48,8 @@ func fathomWebhook(key []byte, store *deals.Store) gin.HandlerFunc {
 			fail(c, err)
 			return
 		}
-		if added > 0 {
-			log.Printf("fathom meeting %s added to %d deals", meeting.RecordingID, added)
+		if recorded > 0 {
+			log.Printf("fathom meeting %s on %d deals", meeting.RecordingID, recorded)
 		}
 		c.Status(http.StatusNoContent)
 	}

@@ -137,18 +137,21 @@ func Parse(body []byte) (Meeting, error) {
 }
 
 var (
-	markdownLink = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
-	blankLines   = regexp.MustCompile(`\n{3,}`)
+	markdownLink   = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
+	markdownEscape = regexp.MustCompile("\\\\([\\\\`*_{}\\[\\]()#+\\-.!~>|])")
+	blankLines     = regexp.MustCompile(`\n{3,}`)
 )
 
 // plainText turns Fathom's markdown summary into the timeline's plain text: no headings' #, no bold **,
-// links as their text. Bullets and line breaks stay.
+// links as their text (Fathom links most lines to their moment in the recording), and escapes like \~
+// as the character. Bullets and line breaks stay.
 func plainText(markdown string) string {
 	lines := strings.Split(strings.ReplaceAll(markdown, "\r\n", "\n"), "\n")
 	for i, line := range lines {
 		line = strings.TrimLeft(line, "#")
 		line = strings.ReplaceAll(line, "**", "")
-		lines[i] = strings.TrimSpace(markdownLink.ReplaceAllString(line, "$1"))
+		line = markdownLink.ReplaceAllString(line, "$1")
+		lines[i] = strings.TrimSpace(markdownEscape.ReplaceAllString(line, "$1"))
 	}
 	return strings.TrimSpace(blankLines.ReplaceAllString(strings.Join(lines, "\n"), "\n\n"))
 }
