@@ -93,6 +93,11 @@ export default function Sidebar({ user, userError, onSignOut, onDisconnectGmail 
             <Mail size={12} aria-hidden /> Connect Gmail
           </a>
         )}
+        {user?.gmail === 'reconnect' && (
+          <a href="/auth/gmail/connect" className="mt-2 flex items-center gap-1.5 text-amber-700 hover:underline">
+            <Mail size={12} aria-hidden /> Reconnect Gmail
+          </a>
+        )}
         {userError && <p className="text-red-600">{userError}</p>}
         {!user && !userError && <p>Loading…</p>}
       </div>
@@ -131,9 +136,9 @@ export function MobileNav({
             Disconnect Gmail
           </button>
         )}
-        {user?.gmail === 'not-connected' && (
+        {(user?.gmail === 'not-connected' || user?.gmail === 'reconnect') && (
           <a href="/auth/gmail/connect" className="rounded-md px-2.5 py-1 text-xs text-indigo-700">
-            Connect Gmail
+            {user.gmail === 'reconnect' ? 'Reconnect Gmail' : 'Connect Gmail'}
           </a>
         )}
         {user?.canSignOut && (

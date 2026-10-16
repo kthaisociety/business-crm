@@ -12,8 +12,9 @@ export type User = {
   role?: Role
   // False for the dev user, who is always signed in (docs/pcr/0007).
   canSignOut?: boolean
-  // Their mailbox (docs/adr/0006): off where Connect Gmail isn't set up.
-  gmail?: 'off' | 'connected' | 'not-connected'
+  // Their mailbox (docs/adr/0006): off where Connect Gmail isn't set up; reconnect when Google no
+  // longer honours the grant.
+  gmail?: 'off' | 'connected' | 'not-connected' | 'reconnect'
 }
 
 // Fired when the server answers 401: the session ended, so the app shows the sign-in page.

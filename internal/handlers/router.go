@@ -32,6 +32,8 @@ type Deps struct {
 	// GmailOIDC and Gmail turn on Connect Gmail (docs/adr/0006), with real sign-in; nil leaves it off.
 	GmailOIDC *auth.OIDC
 	Gmail     *gmail.Connections
+	// GmailSync, if set, is asked to sync a mailbox right after it's connected.
+	GmailSync *gmail.Syncer
 }
 
 func NewRouter(d Deps) *gin.Engine {
@@ -56,7 +58,7 @@ func NewRouter(d Deps) *gin.Engine {
 	registerCompanies(signedIn, d.Deals)
 	registerTeam(signedIn, d.Deals, d.Gmail)
 	if d.Gmail != nil && d.Sessions != nil {
-		registerGmail(r, signedIn, d.GmailOIDC, d.Sessions, d.Gmail)
+		registerGmail(r, signedIn, d.GmailOIDC, d.Sessions, d.Gmail, d.GmailSync)
 	}
 
 	if d.FathomKey != nil {
@@ -78,7 +80,8 @@ func health(pingDB func(ctx context.Context) error) gin.HandlerFunc {
 }
 
 // me is the signed-in user and, with a store, who they are on the team; canSignOut is false for the dev
-// user, who is always signed in. gmail is "off", "connected" or "not-connected" (docs/adr/0006).
+// user, who is always signed in. gmail is "off", "connected", "not-connected" or "reconnect", when Google
+// no longer honours the grant (docs/adr/0006).
 func me(store *deals.Store, canSignOut bool, conns *gmail.Connections) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user := auth.Current(c)
@@ -98,7 +101,14 @@ func me(store *deals.Store, canSignOut bool, conns *gmail.Connections) gin.Handl
 				fail(c, err)
 				return
 			}
-			mailbox = map[bool]string{true: "connected", false: "not-connected"}[status.Connected]
+			switch {
+			case !status.Connected:
+				mailbox = "not-connected"
+			case status.SyncError == gmail.NeedsReconnect:
+				mailbox = "reconnect"
+			default:
+				mailbox = "connected"
+			}
 		}
 		c.JSON(http.StatusOK, gin.H{"sub": user.Subject, "email": user.Email, "name": user.Name, "memberId": member.ID, "role": member.Role, "canSignOut": canSignOut, "gmail": mailbox})
 	}

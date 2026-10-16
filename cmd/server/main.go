@@ -26,6 +26,9 @@ import (
 	"github.com/kthaisociety/business-crm/internal/handlers"
 )
 
+// How often connected mailboxes are synced.
+const gmailSyncEvery = 5 * time.Minute
+
 func main() {
 	// Best effort: in a container the variables are set directly and there's no .env.
 	_ = godotenv.Load()
@@ -85,7 +88,10 @@ func main() {
 		}
 		box, _ := secretbox.New(cfg.TokenEncryptionKey) // checked by Validate
 		deps.Gmail = gmail.NewConnections(db, box)
-		log.Printf("Connect Gmail is on; callback %s (docs/adr/0006)", g.RedirectURL)
+		google := deps.GmailOIDC
+		deps.GmailSync = gmail.NewSyncer(deps.Gmail, google.Client, deps.Deals)
+		go deps.GmailSync.Run(ctx, gmailSyncEvery)
+		log.Printf("Connect Gmail is on, syncing every %s; callback %s (docs/adr/0006)", gmailSyncEvery, g.RedirectURL)
 	}
 	if oidc != nil {
 		deps.OIDC, deps.Sessions = oidc, auth.NewSessions(db, cfg.PublicURL)

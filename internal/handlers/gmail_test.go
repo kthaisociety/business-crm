@@ -170,3 +170,13 @@ func TestRemovingAMemberRemovesTheirMailbox(t *testing.T) {
 func TestWithoutGmailTheAppSaysItsOff(t *testing.T) {
 	assert.Equal(t, "off", decode[map[string]any](t, get(newTeamRouter(t), "/api/me"))["gmail"])
 }
+
+func TestAMailboxGoogleWithdrewAsksToReconnect(t *testing.T) {
+	app, _ := newGmailApp(t)
+	b := signedInAsMaja(t, app)
+	b.through("/auth/gmail/connect", "/auth/gmail/callback", maja())
+
+	require.NoError(t, app.db.Exec("UPDATE gmail_connections SET sync_error = ?", gmail.NeedsReconnect).Error)
+
+	assert.Equal(t, "reconnect", gmailState(t, b))
+}

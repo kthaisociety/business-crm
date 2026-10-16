@@ -74,6 +74,12 @@ of the OAuth client:
 - Clients: add `PUBLIC_URL/auth/gmail/callback` to the authorized redirect URIs
 - Set `TOKEN_ENCRYPTION_KEY` (`openssl rand -base64 32`), a secret like the client's
 
+Every 5 minutes, and right after someone connects, the server syncs each connected mailbox: the first
+time its last 30 days, then only what's new. Mail with a contact in From, To or Cc lands on the
+contact's company's open deals (or its latest), with its subject, Gmail's snippet, sent or received, and
+a link to open it in Gmail. Everything else, drafts, spam and trash are skipped, and team members'
+addresses never count as contacts. If Google withdraws access, the member is asked to reconnect.
+
 Locally, connect only your own mailbox and use your own addresses as contacts
 ([PCR 0007](docs/pcr/0007-real-sign-in-dev-user-for-local-work.md)).
 
