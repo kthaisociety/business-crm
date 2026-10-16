@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-business-crm: the KTHAIS business team's CRM: the deal log as a board and a list. Sign-in is OIDC (Google
+Lucid: the KTHAIS business team's CRM: the deal log as a board and a list. Sign-in is OIDC (Google
 until identity-service is live, ADR 0004), or the dev user for local work (PCR 0007). One repo, one image: a Go server (Gin, GORM, Postgres) serves
 the API under `/api` and an embedded Vite + React frontend everywhere else.
 
@@ -9,12 +9,12 @@ the API under `/api` and an embedded Vite + React frontend everywhere else.
 - Local Postgres: `docker compose up -d`
 - Config: `cp .env.example .env`
 - Made-up data for local dev: `go run ./cmd/seed` (once, on an empty database; makes the dev user an admin);
-  on staging `./business-crm-seed` in the image. Staging holds made-up data only (ADR 0007)
-- A new environment's first admin: `./business-crm appoint-admin EMAIL` in the image (in `/app`), once (ADR 0005)
+  on staging `./lucid-seed` in the image. Staging holds made-up data only (ADR 0007)
+- A new environment's first admin: `./lucid appoint-admin EMAIL` in the image (in `/app`), once (ADR 0005)
 - Backend: `go run ./cmd/server` (on `127.0.0.1:8002`)
 - Frontend dev: `cd frontend && npm install && npm run dev` (Vite on 5174, proxies `/api` to 8002)
 - All checks: `make test` (needs `docker compose up -d`, and `npm install` in `frontend/` once)
-- Image: `docker build -t business-crm .`
+- Image: `docker build -t lucid .`
 
 ## Layout
 

@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/kthaisociety/business-crm/internal/database/databasetest"
-	"github.com/kthaisociety/business-crm/internal/deals"
+	"github.com/kthaisociety/lucid/internal/database/databasetest"
+	"github.com/kthaisociety/lucid/internal/deals"
 )
 
 func newTeamRouter(t *testing.T, adminEmails ...string) *gin.Engine {
@@ -25,7 +25,7 @@ func newTeamRouter(t *testing.T, adminEmails ...string) *gin.Engine {
 	})
 }
 
-// appointAdmins makes these people admins, as `business-crm appoint-admin` does.
+// appointAdmins makes these people admins, as `lucid appoint-admin` does.
 func appointAdmins(t *testing.T, store *deals.Store, emails ...string) {
 	t.Helper()
 	for _, email := range emails {

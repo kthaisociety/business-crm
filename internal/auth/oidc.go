@@ -56,7 +56,7 @@ func NewOIDC(ctx context.Context, cfg OIDCConfig) (*OIDC, error) {
 	}
 	// The flow cookie's signing key, derived from the client secret so there's no other secret to set.
 	mac := hmac.New(sha256.New, []byte(cfg.ClientSecret))
-	mac.Write([]byte("business-crm sign-in flow"))
+	mac.Write([]byte("lucid sign-in flow"))
 	return &OIDC{
 		cfg: cfg,
 		oauth: oauth2.Config{

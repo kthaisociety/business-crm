@@ -9,8 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/kthaisociety/business-crm/internal/auth"
-	"github.com/kthaisociety/business-crm/internal/deals"
+	"github.com/kthaisociety/lucid/internal/auth"
+	"github.com/kthaisociety/lucid/internal/deals"
 )
 
 // The deal log API. Every route is behind auth.Middleware: creating and changing deals records who did it.

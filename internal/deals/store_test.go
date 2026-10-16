@@ -8,9 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/kthaisociety/business-crm/internal/auth"
-	"github.com/kthaisociety/business-crm/internal/database/databasetest"
-	"github.com/kthaisociety/business-crm/internal/deals"
+	"github.com/kthaisociety/lucid/internal/auth"
+	"github.com/kthaisociety/lucid/internal/database/databasetest"
+	"github.com/kthaisociety/lucid/internal/deals"
 )
 
 var alva = auth.User{Subject: "dev", Email: "alva@example.com", Name: "Alva Lindqvist"}

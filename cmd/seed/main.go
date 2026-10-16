@@ -4,7 +4,7 @@
 // after `docker compose up -d`, or once on staging from the image:
 //
 //	go run ./cmd/seed
-//	./business-crm-seed
+//	./lucid-seed
 package main
 
 import (
@@ -15,9 +15,9 @@ import (
 	"github.com/joho/godotenv"
 	"gorm.io/gorm"
 
-	"github.com/kthaisociety/business-crm/internal/config"
-	"github.com/kthaisociety/business-crm/internal/database"
-	"github.com/kthaisociety/business-crm/internal/deals"
+	"github.com/kthaisociety/lucid/internal/config"
+	"github.com/kthaisociety/lucid/internal/database"
+	"github.com/kthaisociety/lucid/internal/deals"
 )
 
 func main() {

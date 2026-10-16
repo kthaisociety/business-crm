@@ -8,8 +8,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/kthaisociety/business-crm/internal/database/databasetest"
-	"github.com/kthaisociety/business-crm/internal/deals"
+	"github.com/kthaisociety/lucid/internal/database/databasetest"
+	"github.com/kthaisociety/lucid/internal/deals"
 )
 
 func conflictError(t *testing.T, err error) {

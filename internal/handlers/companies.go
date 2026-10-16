@@ -8,9 +8,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/kthaisociety/business-crm/internal/auth"
-	"github.com/kthaisociety/business-crm/internal/deals"
-	"github.com/kthaisociety/business-crm/internal/gmail"
+	"github.com/kthaisociety/lucid/internal/auth"
+	"github.com/kthaisociety/lucid/internal/deals"
+	"github.com/kthaisociety/lucid/internal/gmail"
 )
 
 // Companies and contacts. Deals point at them, so a company or contact with deals can't be deleted (409).

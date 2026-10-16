@@ -11,9 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"github.com/kthaisociety/business-crm/internal/auth"
-	"github.com/kthaisociety/business-crm/internal/database/databasetest"
-	"github.com/kthaisociety/business-crm/internal/deals"
+	"github.com/kthaisociety/lucid/internal/auth"
+	"github.com/kthaisociety/lucid/internal/database/databasetest"
+	"github.com/kthaisociety/lucid/internal/deals"
 )
 
 var oskar = auth.User{Subject: "oskar", Email: "oskar@example.com", Name: "Oskar Berg"}
@@ -33,7 +33,7 @@ func TestSigningInJoinsTheTeamAsAMember(t *testing.T) {
 	assert.ErrorAs(t, s.RequireAdmin(ctx, alva), &forbidden)
 }
 
-// appoint makes u the team's first admin, as `business-crm appoint-admin` does.
+// appoint makes u the team's first admin, as `lucid appoint-admin` does.
 func appoint(t *testing.T, s *deals.Store, u auth.User) {
 	t.Helper()
 	_, err := s.AppointAdmin(context.Background(), u.Email, u.Name, false)

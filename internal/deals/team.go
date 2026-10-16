@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/kthaisociety/business-crm/internal/auth"
+	"github.com/kthaisociety/lucid/internal/auth"
 )
 
 // The business team (docs/adr/0003): who can own and support deals, and what role they have here.

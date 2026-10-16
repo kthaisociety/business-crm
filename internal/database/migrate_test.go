@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/kthaisociety/business-crm/internal/database"
-	"github.com/kthaisociety/business-crm/internal/database/databasetest"
+	"github.com/kthaisociety/lucid/internal/database"
+	"github.com/kthaisociety/lucid/internal/database/databasetest"
 )
 
 func TestMigrationsApplyToAnEmptyDatabaseAndRerunAsANoOp(t *testing.T) {

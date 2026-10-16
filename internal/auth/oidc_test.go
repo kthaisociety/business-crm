@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/kthaisociety/business-crm/internal/auth/authtest"
+	"github.com/kthaisociety/lucid/internal/auth/authtest"
 )
 
 func TestASignInGivesUpOnAProviderThatStopsAnswering(t *testing.T) {

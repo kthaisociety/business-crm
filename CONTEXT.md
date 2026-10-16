@@ -2,7 +2,7 @@
 
 Words as this project uses them.
 
-- **Business CRM**: this app. The business team's CRM, for KTHAIS's relations with companies.
+- **Lucid**: this app. The business team's CRM, for KTHAIS's relations with companies (called business-crm until the repo was renamed).
 - **Business team**: the KTHAIS team that runs company relations and partnerships.
 - **User**: the person signed in.
 - **Sign-in**: with an @kthais.com Google account through OIDC, for people an admin has added to the team;

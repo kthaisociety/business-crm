@@ -15,15 +15,15 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"github.com/kthaisociety/business-crm/frontend"
-	"github.com/kthaisociety/business-crm/internal/auth"
-	"github.com/kthaisociety/business-crm/internal/config"
-	"github.com/kthaisociety/business-crm/internal/database"
-	"github.com/kthaisociety/business-crm/internal/deals"
-	"github.com/kthaisociety/business-crm/internal/fathom"
-	"github.com/kthaisociety/business-crm/internal/gmail"
-	"github.com/kthaisociety/business-crm/internal/secretbox"
-	"github.com/kthaisociety/business-crm/internal/handlers"
+	"github.com/kthaisociety/lucid/frontend"
+	"github.com/kthaisociety/lucid/internal/auth"
+	"github.com/kthaisociety/lucid/internal/config"
+	"github.com/kthaisociety/lucid/internal/database"
+	"github.com/kthaisociety/lucid/internal/deals"
+	"github.com/kthaisociety/lucid/internal/fathom"
+	"github.com/kthaisociety/lucid/internal/gmail"
+	"github.com/kthaisociety/lucid/internal/secretbox"
+	"github.com/kthaisociety/lucid/internal/handlers"
 )
 
 // How often connected mailboxes are synced.
@@ -105,7 +105,7 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
-		log.Printf("business-crm listening on %s", srv.Addr)
+		log.Printf("lucid listening on %s", srv.Addr)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatal(err)
 		}
@@ -119,7 +119,7 @@ func main() {
 	}
 }
 
-// appointAdmin is `business-crm appoint-admin [-name NAME] [-force] EMAIL`: it makes someone the first
+// appointAdmin is `lucid appoint-admin [-name NAME] [-force] EMAIL`: it makes someone the first
 // admin of a new environment, run once from the same image (docs/adr/0005). After that, admins hand over
 // on the Team page; -force adds an admin anyway, to recover a team whose admins have all left.
 func appointAdmin(cfg *config.Config, args []string) {
@@ -127,7 +127,7 @@ func appointAdmin(cfg *config.Config, args []string) {
 	name := flags.String("name", "", "their name until they sign in (default: the email's local part)")
 	force := flags.Bool("force", false, "appoint even though the team has an admin (recovery only)")
 	flags.Usage = func() {
-		fmt.Fprintln(flags.Output(), "usage: ./business-crm appoint-admin [-name NAME] [-force] EMAIL")
+		fmt.Fprintln(flags.Output(), "usage: ./lucid appoint-admin [-name NAME] [-force] EMAIL")
 		flags.PrintDefaults()
 	}
 	_ = flags.Parse(args)
