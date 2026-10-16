@@ -39,9 +39,9 @@ func (s *Store) SignIn(ctx context.Context, u auth.User) (MemberView, error) {
 // ErrNotOnTeam refuses a real sign-in by someone no admin has added (docs/adr/0004).
 var ErrNotOnTeam = errors.New("not on the team: ask an admin to add you")
 
-// Admit lets someone who signed in for real (docs/adr/0004) in if they're on the team or in ADMIN_EMAILS,
-// taking their name from the provider, and returns who they are on the team. Anyone else gets
-// ErrNotOnTeam. It needs a store made with OnlyTeamMembers.
+// Admit lets someone who signed in for real (docs/adr/0004) in if they're on the team, taking their name
+// from the provider, and returns who they are on the team. Anyone else gets ErrNotOnTeam. It needs a
+// store made with OnlyTeamMembers.
 func (s *Store) Admit(ctx context.Context, u auth.User) (MemberView, error) {
 	if !s.onlyTeam {
 		return MemberView{}, errors.New("Admit needs a store that lets in only team members")
@@ -187,14 +187,88 @@ func (s *Store) RemoveMember(ctx context.Context, id string) error {
 	})
 }
 
+// AppointAdmin makes someone an admin from outside the app (docs/adr/0005): the first admin of a new
+// environment, adding them to the team if needed. While the team has an admin it refuses, since admins
+// hand over in the app; force adds one anyway, to recover a team whose admins have all left.
+func (s *Store) AppointAdmin(ctx context.Context, email, name string, force bool) (MemberView, error) {
+	in := MemberInput{Email: email, Name: name, Role: "admin"}
+	if in.Name == "" {
+		in.Name, _, _ = strings.Cut(strings.TrimSpace(email), "@")
+	}
+	if err := in.validate(); err != nil {
+		return MemberView{}, err
+	}
+	var m Member
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		admins, err := lockAdmins(tx)
+		if err != nil {
+			return err
+		}
+		if i := slices.IndexFunc(admins, func(a Member) bool { return a.Email == in.Email }); i >= 0 {
+			m = admins[i]
+			return nil
+		}
+		if len(admins) > 0 && !force {
+			return conflict("the team already has an admin (%s): they hand over on the Team page", admins[0].Email)
+		}
+		err = tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "email"}},
+			DoUpdates: clause.AssignmentColumns([]string{"role"}),
+		}).Create(&Member{Email: in.Email, Name: in.Name, Role: "admin"}).Error
+		if err != nil {
+			return err
+		}
+		// Someone already on the team keeps their name.
+		return tx.Where("email = ?", in.Email).Take(&m).Error
+	})
+	return viewOfMember(m), err
+}
+
+// HandOverAdmin makes the member with id `to` an admin and the signed-in admin `stepDownTo` (board or
+// member), in one step, so the team never goes without an admin or ends up with an extra one.
+func (s *Store) HandOverAdmin(ctx context.Context, by auth.User, to, stepDownTo string) (MemberView, error) {
+	if stepDownTo != "board" && stepDownTo != "member" {
+		return MemberView{}, invalid("you can step down to board or member")
+	}
+	if !uuidPattern.MatchString(to) {
+		return MemberView{}, ErrMemberNotFound
+	}
+	var me Member
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		admins, err := lockAdmins(tx)
+		if err != nil {
+			return err
+		}
+		i := slices.IndexFunc(admins, func(a Member) bool { return strings.EqualFold(a.Email, by.Email) })
+		if i < 0 {
+			return &ForbiddenError{msg: "only admins can hand over admin"}
+		}
+		me = admins[i]
+		if me.ID == to {
+			return invalid("pick someone else to hand admin over to")
+		}
+		var next Member
+		if err := tx.Clauses(clause.Locking{Strength: "NO KEY UPDATE"}).Where("id = ?", to).Take(&next).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrMemberNotFound
+		} else if err != nil {
+			return err
+		}
+		if err := tx.Model(&next).Update("role", "admin").Error; err != nil {
+			return err
+		}
+		me.Role = stepDownTo
+		return tx.Model(&me).Update("role", stepDownTo).Error
+	})
+	return viewOfMember(me), err
+}
+
 // keepAnAdmin refuses demoting or removing the member with this id if they're the last admin. It locks
 // the admins' rows until the transaction ends, so two requests demoting or removing different admins at
 // once take turns: the second sees the first's change, and can't leave the team without an admin. The lock
 // is FOR NO KEY UPDATE, which lets a new deal's foreign-key check on an admin through: FOR UPDATE would
 // wait for it, and deadlock with a lead whose author is another admin.
 func keepAnAdmin(tx *gorm.DB, id string) error {
-	var admins []Member
-	err := tx.Clauses(clause.Locking{Strength: "NO KEY UPDATE"}).Where("role = 'admin'").Order("id").Find(&admins).Error
+	admins, err := lockAdmins(tx)
 	if err != nil {
 		return err
 	}
@@ -203,4 +277,12 @@ func keepAnAdmin(tx *gorm.DB, id string) error {
 		return conflict("the team needs at least one admin")
 	}
 	return nil
+}
+
+// lockAdmins reads the admins and locks their rows until the transaction ends, always in the same order,
+// so changes to who is admin take turns.
+func lockAdmins(tx *gorm.DB) ([]Member, error) {
+	var admins []Member
+	err := tx.Clauses(clause.Locking{Strength: "NO KEY UPDATE"}).Where("role = 'admin'").Order("id").Find(&admins).Error
+	return admins, err
 }

@@ -1,5 +1,5 @@
 // Command seed fills an empty local database with made-up companies, contacts and deals, so the app has something to show in
-// development. Everything here is fictional (docs/pcr/0005): companies, people, @example.com addresses
+// development. Everything here is fictional (docs/pcr/0007): companies, people, @example.com addresses
 // and fees. It refuses to touch a database that already has deals. Run it after `docker compose up -d`:
 //
 //	go run ./cmd/seed
@@ -44,6 +44,14 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("seeded %d made-up deals", len(seedDeals()))
+
+	// The dev user manages the team locally, like a new environment's appointed admin (docs/adr/0005).
+	if cfg.DevUserEmail != "" {
+		if _, err := deals.NewStore(db).AppointAdmin(ctx, cfg.DevUserEmail, "Dev User", true); err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("%s is an admin", cfg.DevUserEmail)
+	}
 }
 
 func seed(tx *gorm.DB) error {

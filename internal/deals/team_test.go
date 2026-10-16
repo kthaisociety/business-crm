@@ -32,23 +32,93 @@ func TestSigningInJoinsTheTeamAsAMember(t *testing.T) {
 	assert.ErrorAs(t, s.RequireAdmin(ctx, alva), &forbidden)
 }
 
-func TestAdminEmailsBecomeAdminsOnSignIn(t *testing.T) {
-	s := deals.NewStore(databasetest.Open(t), "ALVA@example.com")
+// appoint makes u the team's first admin, as `business-crm appoint-admin` does.
+func appoint(t *testing.T, s *deals.Store, u auth.User) {
+	t.Helper()
+	_, err := s.AppointAdmin(context.Background(), u.Email, u.Name, false)
+	require.NoError(t, err)
+}
+
+func TestTheFirstAdminIsAppointed(t *testing.T) {
+	s := deals.NewStore(databasetest.Open(t)).OnlyTeamMembers()
 	ctx := context.Background()
 
-	me, err := s.SignIn(ctx, alva)
+	first, err := s.AppointAdmin(ctx, " ALVA@example.com ", "", false)
 	require.NoError(t, err)
-	assert.Equal(t, "admin", me.Role)
+	assert.Equal(t, "admin", first.Role)
+	assert.Equal(t, "alva@example.com", first.Email)
+	assert.Equal(t, "ALVA", first.Name, "without a name, the email's local part stands in until sign-in")
+
+	me, err := s.Admit(ctx, alva)
+	require.NoError(t, err)
+	assert.Equal(t, first.ID, me.ID)
+	assert.Equal(t, alva.Name, me.Name)
 	assert.NoError(t, s.RequireAdmin(ctx, alva))
 
-	other, err := s.SignIn(ctx, oskar)
+	again, err := s.AppointAdmin(ctx, alva.Email, "", false)
+	require.NoError(t, err, "appointing the admin again changes nothing")
+	assert.Equal(t, first.ID, again.ID)
+}
+
+func TestAppointingRefusesWhileTheTeamHasAnAdmin(t *testing.T) {
+	s := deals.NewStore(databasetest.Open(t))
+	ctx := context.Background()
+	appoint(t, s, alva)
+	_, err := s.AddMember(ctx, deals.MemberInput{Email: oskar.Email, Name: oskar.Name})
 	require.NoError(t, err)
-	assert.Equal(t, "member", other.Role)
+
+	_, err = s.AppointAdmin(ctx, oskar.Email, "", false)
+	conflictError(t, err)
+	assert.ErrorContains(t, err, "alva@example.com")
+
+	// Recovery, when every admin has left without handing over.
+	forced, err := s.AppointAdmin(ctx, oskar.Email, "", true)
+	require.NoError(t, err)
+	assert.Equal(t, "admin", forced.Role)
+	assert.Equal(t, oskar.Name, forced.Name, "an existing member keeps their name")
+}
+
+func TestAnAdminHandsOver(t *testing.T) {
+	s := deals.NewStore(databasetest.Open(t))
+	ctx := context.Background()
+	appoint(t, s, alva)
+	next, err := s.AddMember(ctx, deals.MemberInput{Email: oskar.Email, Name: oskar.Name})
+	require.NoError(t, err)
+
+	me, err := s.HandOverAdmin(ctx, alva, next.ID, "board")
+	require.NoError(t, err)
+
+	assert.Equal(t, "board", me.Role)
+	var forbidden *deals.ForbiddenError
+	assert.ErrorAs(t, s.RequireAdmin(ctx, alva), &forbidden)
+	assert.NoError(t, s.RequireAdmin(ctx, oskar))
+}
+
+func TestHandingOverNeedsAnAdminAndSomeoneElse(t *testing.T) {
+	s := deals.NewStore(databasetest.Open(t))
+	ctx := context.Background()
+	appoint(t, s, alva)
+	other, err := s.AddMember(ctx, deals.MemberInput{Email: oskar.Email, Name: oskar.Name})
+	require.NoError(t, err)
+	me, err := s.SignIn(ctx, alva)
+	require.NoError(t, err)
+
+	var forbidden *deals.ForbiddenError
+	_, err = s.HandOverAdmin(ctx, oskar, me.ID, "member")
+	assert.ErrorAs(t, err, &forbidden, "a member can't take admin")
+	_, err = s.HandOverAdmin(ctx, alva, me.ID, "member")
+	validationError(t, err)
+	_, err = s.HandOverAdmin(ctx, alva, other.ID, "admin")
+	validationError(t, err)
+	_, err = s.HandOverAdmin(ctx, alva, "00000000-0000-0000-0000-000000000001", "member")
+	assert.ErrorIs(t, err, deals.ErrMemberNotFound)
+	assert.NoError(t, s.RequireAdmin(ctx, alva), "nothing changed")
 }
 
 func TestAdminsAddAndChangeTeamMembers(t *testing.T) {
-	s := deals.NewStore(databasetest.Open(t), alva.Email)
+	s := deals.NewStore(databasetest.Open(t))
 	ctx := context.Background()
+	appoint(t, s, alva)
 	_, err := s.SignIn(ctx, alva)
 	require.NoError(t, err)
 
@@ -72,8 +142,9 @@ func TestAdminsAddAndChangeTeamMembers(t *testing.T) {
 }
 
 func TestTheTeamKeepsAnAdmin(t *testing.T) {
-	s := deals.NewStore(databasetest.Open(t), alva.Email)
+	s := deals.NewStore(databasetest.Open(t))
 	ctx := context.Background()
+	appoint(t, s, alva)
 	me, err := s.SignIn(ctx, alva)
 	require.NoError(t, err)
 
@@ -257,11 +328,10 @@ func TestARemovedMemberStaysRemoved(t *testing.T) {
 	assert.Empty(t, team)
 }
 
-func TestOnlyTeamMembersStillLetsAdminEmailsIn(t *testing.T) {
-	s := deals.NewStore(databasetest.Open(t), "maja@example.com").OnlyTeamMembers()
+func TestOnlyTeamMembersLetsNoOneElseIn(t *testing.T) {
+	s := deals.NewStore(databasetest.Open(t)).OnlyTeamMembers()
 
-	me, err := s.Admit(context.Background(), auth.User{Email: "Maja@example.com", Name: "Maja Holm"})
+	_, err := s.Admit(context.Background(), auth.User{Email: "maja@example.com", Name: "Maja Holm"})
 
-	require.NoError(t, err)
-	assert.Equal(t, "admin", me.Role)
+	assert.ErrorIs(t, err, deals.ErrNotOnTeam)
 }

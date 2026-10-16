@@ -155,6 +155,17 @@ export function stubApi(
       return json(deal, 201)
     }
 
+    const handOver = path.match(/^\/api\/members\/([^/]+)\/hand-over-admin$/)
+    if (handOver && method === 'POST') {
+      const me = api.members.find((m) => m.id === devMember.id)!
+      if (me.role !== 'admin') return error(403, 'only admins can hand over admin')
+      const next = api.members.find((m) => m.id === handOver[1])
+      if (!next) return error(404, 'team member not found')
+      next.role = 'admin'
+      me.role = body.stepDownTo as Role
+      return json(me)
+    }
+
     const member = path.match(/^\/api\/members(?:\/([^/]+))?$/)
     if (member && method !== 'GET') {
       if (role !== 'admin') return error(403, 'only admins can change the team')

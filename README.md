@@ -36,7 +36,7 @@ Rebuild after backend changes (`--build` again). `npm run dev` still works again
 The dev user signs every request in. To sign in for real instead, set the OIDC client in `.env` and unset
 `DEV_USER_EMAIL` (see `.env.example`), and add `PUBLIC_URL/auth/callback` (e.g.
 `http://127.0.0.1:5174/auth/callback`) to the client's authorized redirect URIs. Put your own email in
-`ADMIN_EMAILS` to get in the first time; anyone else needs an admin to add them on the Team page.
+admin once to get in the first time (below); anyone else needs an admin to add them on the Team page.
 
 ## Tests
 
@@ -45,6 +45,21 @@ make test             # both halves; run `npm install` in frontend/ first
 make test-backend     # go vet, go test -race ./...; database tests need `docker compose up -d`
 make test-frontend    # lint, Vitest, build, in frontend/
 ```
+
+## The first admin
+
+A new environment has no admin. Run this once, from the same image, for whoever runs the team (usually the
+head of business):
+
+```sh
+business-crm appoint-admin -name "Their Name" them@kthais.com   # in the image
+go run ./cmd/server appoint-admin them@kthais.com               # locally
+```
+
+After that, admins hand over on the Team page: the new admin is picked there, and the old one steps down
+to board or member. The command refuses while the team has an admin; `-force` is for recovery when every
+admin has left without handing over ([ADR 0005](docs/adr/0005-appoint-the-first-admin-once.md)). Locally,
+`go run ./cmd/seed` already makes the dev user an admin.
 
 ## Database
 
@@ -67,6 +82,7 @@ The schema is SQL files in `internal/database/migrations/`, applied by the serve
 | `POST /api/deals/:id/notes` | adds a quick note to the deal's timeline: `{body}` |
 | `GET`, `POST /api/companies`; `PATCH`, `DELETE /api/companies/:id` | companies: `{name, website, notes}`; names are unique ignoring case |
 | `GET`, `POST /api/contacts`; `PATCH`, `DELETE /api/contacts/:id` | contacts: `{companyId, name, email, role}`; emails are unique |
+| `POST /api/members/:id/hand-over-admin` | makes the member an admin and you `{stepDownTo}`: `board` or `member`; admins only |
 | `GET /api/members`; `POST`, `PATCH`, `DELETE /api/members/:id` | the business team: `{email, name, role}`, role `admin`, `board` or `member`; only admins change it (403 otherwise) |
 
 Every `/api` route but health needs a signed-in user: a session cookie, or the dev user. A bad request gets a 400 whose `error` says what was wrong; one
@@ -85,7 +101,6 @@ All from env, read by the Go server ([PCR 0001](docs/pcr/0001-config-from-env.md
 | `PUBLIC_URL` | no | where the app is served; the callback is `PUBLIC_URL/auth/callback`. https, except on 127.0.0.1 or localhost |
 | `SIGN_IN_DOMAIN` | no | the email domain that may sign in, default `kthais.com` |
 | `DEV_USER_EMAIL` | no | without an OIDC client, signs every request in as this user; local work only ([PCR 0007](docs/pcr/0007-real-sign-in-dev-user-for-local-work.md)) |
-| `ADMIN_EMAILS` | no | comma-separated emails let in and made admins when they sign in ([ADR 0003](docs/adr/0003-team-members-and-roles.md)) |
 | `HOST`, `PORT` | no | default all interfaces, `8000` |
 
 ## Delivery

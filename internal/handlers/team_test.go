@@ -15,12 +15,23 @@ import (
 
 func newTeamRouter(t *testing.T, adminEmails ...string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
+	store := deals.NewStore(databasetest.Open(t))
+	appointAdmins(t, store, adminEmails...)
 	return NewRouter(Deps{
 		PingDB:   func(context.Context) error { return nil },
 		Frontend: builtUI,
 		DevUser:  devUser,
-		Deals:    deals.NewStore(databasetest.Open(t), adminEmails...),
+		Deals:    store,
 	})
+}
+
+// appointAdmins makes these people admins, as `business-crm appoint-admin` does.
+func appointAdmins(t *testing.T, store *deals.Store, emails ...string) {
+	t.Helper()
+	for _, email := range emails {
+		_, err := store.AppointAdmin(context.Background(), email, "", true)
+		require.NoError(t, err)
+	}
 }
 
 func TestMeSaysWhoIAmOnTheTeam(t *testing.T) {
@@ -67,4 +78,24 @@ func TestAdminsManageTheTeam(t *testing.T) {
 
 	me := decode[map[string]any](t, get(r, "/api/me"))
 	assert.Equal(t, http.StatusConflict, send(r, http.MethodPatch, "/api/members/"+me["memberId"].(string), `{"role":"member"}`).Code)
+}
+
+func TestAnAdminHandsOverOnTheTeamPage(t *testing.T) {
+	r := newTeamRouter(t, devUser.Email)
+	w := send(r, http.MethodPost, "/api/members", `{"email":"maja@example.com","name":"Maja Holm"}`)
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	maja := decode[deals.MemberView](t, w)
+
+	w = send(r, http.MethodPost, "/api/members/"+maja.ID+"/hand-over-admin", `{"stepDownTo":"board"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Equal(t, "board", decode[deals.MemberView](t, w).Role)
+
+	assert.Equal(t, "board", decode[map[string]any](t, get(r, "/api/me"))["role"])
+	w = send(r, http.MethodPost, "/api/members/"+maja.ID+"/hand-over-admin", `{"stepDownTo":"member"}`)
+	assert.Equal(t, http.StatusForbidden, w.Code, "only an admin hands over")
+	for _, m := range decode[[]deals.MemberView](t, get(r, "/api/members")) {
+		if m.ID == maja.ID {
+			assert.Equal(t, "admin", m.Role)
+		}
+	}
 }

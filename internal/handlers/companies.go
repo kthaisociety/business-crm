@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 
@@ -102,4 +103,29 @@ func registerTeam(r *gin.RouterGroup, store *deals.Store) {
 	admin.POST("/members", create(store.AddMember))
 	admin.PATCH("/members/:id", patch(deals.ParseMemberPatch, store.UpdateMember))
 	admin.DELETE("/members/:id", remove(store.RemoveMember))
+	admin.POST("/members/:id/hand-over-admin", handOverAdmin(store))
+}
+
+// handOverAdmin makes the member an admin, and the signed-in admin `{stepDownTo}`: board or member
+// (docs/adr/0005). It answers with who the signed-in admin is now.
+func handOverAdmin(store *deals.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var body struct {
+			StepDownTo string `json:"stepDownTo"`
+		}
+		raw, ok := readBody(c)
+		if !ok {
+			return
+		}
+		if err := json.Unmarshal(raw, &body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "the body must be JSON: {stepDownTo}"})
+			return
+		}
+		me, err := store.HandOverAdmin(c.Request.Context(), auth.Current(c), c.Param("id"), body.StepDownTo)
+		if err != nil {
+			fail(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, me)
+	}
 }

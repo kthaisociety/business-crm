@@ -935,6 +935,23 @@ test('Team lists the business team; admins add members and change roles', async 
   await waitFor(() => expect(screen.queryByText('Mia Lind')).not.toBeInTheDocument())
 })
 
+test('an admin hands over to a new head of business, and steps down to board', async () => {
+  renderAt('/team')
+  await screen.findByText('Iris Wallin')
+
+  fireEvent.click(screen.getByRole('button', { name: 'Hand over admin' }))
+  const form = await dialogNamed('Hand over admin')
+  fireEvent.change(within(form).getByLabelText('New admin'), { target: { value: 'm-iris' } })
+  expect(within(form).getByLabelText('You become')).toHaveValue('board')
+  fireEvent.click(within(form).getByRole('button', { name: 'Hand over' }))
+
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Add member' })).not.toBeInTheDocument())
+  expect(screen.queryByRole('dialog', { name: 'Hand over admin' })).not.toBeInTheDocument()
+  expect(api.members.find((m) => m.id === 'm-iris')?.role).toBe('admin')
+  expect(screen.getByText('Iris Wallin').closest('tr')).toHaveTextContent('Admin')
+  expect(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Reports' })).toBeInTheDocument()
+})
+
 test('a role change the server refuses shows why', async () => {
   api.fail('PATCH', /^\/api\/members\//, 409, 'the team needs at least one admin')
   renderAt('/team')

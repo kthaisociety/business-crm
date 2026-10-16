@@ -114,3 +114,6 @@ export const addMember = (member: MemberInput) => call<Person>('POST', '/api/mem
 export const updateMember = (id: string, patch: Partial<Pick<MemberInput, 'name' | 'role'>>) =>
   call<Person>('PATCH', `/api/members/${encodeURIComponent(id)}`, patch)
 export const removeMember = (id: string) => call<void>('DELETE', `/api/members/${encodeURIComponent(id)}`)
+// Makes the member an admin and you `stepDownTo` in one step (docs/adr/0005); answers with who you are now.
+export const handOverAdmin = (id: string, stepDownTo: 'board' | 'member') =>
+  call<Person>('POST', `/api/members/${encodeURIComponent(id)}/hand-over-admin`, { stepDownTo })

@@ -20,7 +20,9 @@ Words as this project uses them.
 - **Contact**: a person at a company, identified by their email. A deal's contact always works at the
   deal's company, and email sync and Fathom will match senders and attendees to contacts.
 - **Team member**: someone on the business team, with a role: **admin** (also manages the team),
-  **board** or **member** ([ADR 0003](docs/adr/0003-team-members-and-roles.md)).
+  **board** or **member** ([ADR 0003](docs/adr/0003-team-members-and-roles.md)). A new environment's
+  first admin is **appointed** once with a command; after that an admin **hands over** to the next head of
+  business on the Team page ([ADR 0005](docs/adr/0005-appoint-the-first-admin-once.md)).
 - **Owner** and **Support**: the team member who runs a deal, and the members who help. A lead can have no
   owner yet; anyone can **claim** it (assign it to themselves) or assign it to someone else.
 - **Next step**: the one thing to do next on a deal, with an optional due date.

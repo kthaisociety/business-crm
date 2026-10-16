@@ -27,7 +27,6 @@ services:
     environment:
       DATABASE_URL: postgres://crm:crm@db:5432/crm?sslmode=disable
       DEV_USER_EMAIL: dev@kthais.com
-      ADMIN_EMAILS: dev@kthais.com
     ports:
       - "127.0.0.1:8002:8000"
     depends_on:

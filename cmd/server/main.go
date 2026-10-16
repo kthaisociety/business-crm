@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -28,6 +31,10 @@ func main() {
 	err := cfg.Validate()
 	if err != nil {
 		log.Fatal(err)
+	}
+	if len(os.Args) > 1 && os.Args[1] == "appoint-admin" {
+		appointAdmin(cfg, os.Args[2:])
+		return
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -60,7 +67,7 @@ func main() {
 		PingDB:   func(ctx context.Context) error { return database.Ping(ctx, db) },
 		Frontend: frontend.Dist(),
 		DevUser:  cfg.DevUser(),
-		Deals:    deals.NewStore(db, cfg.AdminEmails...),
+		Deals:    deals.NewStore(db),
 	}
 	if oidc != nil {
 		deps.OIDC, deps.Sessions = oidc, auth.NewSessions(db, cfg.PublicURL)
@@ -86,4 +93,36 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+}
+
+// appointAdmin is `business-crm appoint-admin [-name NAME] [-force] EMAIL`: it makes someone the first
+// admin of a new environment, run once from the same image (docs/adr/0005). After that, admins hand over
+// on the Team page; -force adds an admin anyway, to recover a team whose admins have all left.
+func appointAdmin(cfg *config.Config, args []string) {
+	flags := flag.NewFlagSet("appoint-admin", flag.ExitOnError)
+	name := flags.String("name", "", "their name until they sign in (default: the email's local part)")
+	force := flags.Bool("force", false, "appoint even though the team has an admin (recovery only)")
+	flags.Usage = func() {
+		fmt.Fprintln(flags.Output(), "usage: business-crm appoint-admin [-name NAME] [-force] EMAIL")
+		flags.PrintDefaults()
+	}
+	_ = flags.Parse(args)
+	if flags.NArg() != 1 {
+		flags.Usage()
+		os.Exit(2)
+	}
+
+	ctx := context.Background()
+	db, err := database.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := database.Migrate(ctx, db); err != nil {
+		log.Fatal(err)
+	}
+	admin, err := deals.NewStore(db).AppointAdmin(ctx, flags.Arg(0), *name, *force)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("%s <%s> is an admin", admin.Name, admin.Email)
 }
