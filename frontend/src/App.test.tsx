@@ -916,7 +916,7 @@ test('Team lists the business team; admins add members and change roles', async 
 
   const iris = (await screen.findByText('Iris Wallin')).closest('tr')!
   expect(within(iris).getByLabelText('Role of Iris Wallin')).toHaveDisplayValue('Member')
-  expect(screen.getByText('Dev User').closest('tr')).toHaveTextContent('(you)')
+  expect(within(screen.getByRole('table')).getByText('Dev User').closest('tr')).toHaveTextContent('(you)')
 
   fireEvent.change(within(iris).getByLabelText('Role of Iris Wallin'), { target: { value: 'board' } })
   await waitFor(() => expect(api.members.find((m) => m.id === 'm-iris')?.role).toBe('board'))
@@ -953,7 +953,7 @@ test('members see the team but can’t change it', async () => {
   expect(iris).toHaveTextContent('Member')
   expect(within(iris).queryByRole('combobox')).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Add member' })).not.toBeInTheDocument()
-  expect(await screen.findByText('member', { selector: 'p' })).toBeInTheDocument()
+  expect(await screen.findByText('member', { selector: 'aside span' })).toBeInTheDocument()
 })
 
 test('Reports are for the board and admins', async () => {
@@ -1019,16 +1019,16 @@ test('on a first sign-in, the team includes you once signing in has added you', 
   const signIn = api.hold('GET', /^\/api\/me$/, { late: true })
   renderAt('/team')
   await screen.findByText('Iris Wallin')
-  expect(screen.queryByText('Dev User')).not.toBeInTheDocument()
+  expect(within(screen.getByRole('table')).queryByText('Dev User')).not.toBeInTheDocument()
 
   await act(() => signIn.release())
 
-  expect(await screen.findByText('Dev User')).toBeInTheDocument()
+  expect(await within(screen.getByRole('table')).findByText('Dev User')).toBeInTheDocument()
 })
 
 test('changing your own role changes what you can do at once', async () => {
   renderAt('/team')
-  const me = (await screen.findByText('Dev User')).closest('tr')!
+  const me = (await within(await screen.findByRole('table')).findByText('Dev User')).closest('tr')!
   expect(within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', { name: 'Reports' })).toBeInTheDocument()
 
   fireEvent.change(within(me).getByLabelText('Role of Dev User'), { target: { value: 'member' } })

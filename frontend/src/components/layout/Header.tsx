@@ -1,5 +1,6 @@
 import { Plus, Search } from 'lucide-react'
 import { formatSEK } from '../../format'
+import Logo from '../Logo'
 
 type Props = {
   semesters: string[]
@@ -19,13 +20,11 @@ export default function Header(props: Props) {
   const { canAddLead, onNewLead } = props
 
   return (
-    <header className="z-20 flex h-14 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-6">
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2.5 border-r border-gray-200 pr-4">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-indigo-100 bg-indigo-50 text-sm font-bold text-indigo-600 shadow-sm">
-            AI
-          </div>
-          <div>
+    <header className="z-20 flex h-14 shrink-0 items-center justify-between gap-3 border-b border-gray-200 bg-white px-4 md:px-6">
+      <div className="flex min-w-0 items-center gap-3 md:gap-4">
+        <div className="flex items-center gap-2.5 sm:border-r sm:border-gray-200 sm:pr-4">
+          <Logo className="shrink-0 shadow-sm" />
+          <div className="hidden sm:block">
             <h1 className="font-display text-sm leading-tight font-bold text-gray-900">Lucid</h1>
             <p className="text-[11px] font-medium text-gray-500">Corporate Outreach CRM</p>
           </div>
@@ -55,7 +54,7 @@ export default function Header(props: Props) {
           />
         </label>
       </div>
-      <div className="flex items-center gap-4">
+      <div className="flex shrink-0 items-center gap-4">
         <div className="hidden items-center gap-2 xl:flex">
           <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-1 text-xs text-gray-600">
             Open Deals: <strong className="font-semibold text-gray-900">{openDeals}</strong>
@@ -72,9 +71,11 @@ export default function Header(props: Props) {
           onClick={onNewLead}
           disabled={!canAddLead}
           title={canAddLead ? undefined : 'Available once you are signed in'}
-          className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+          aria-label="New Lead"
+          className="flex items-center gap-1.5 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-semibold whitespace-nowrap text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 sm:px-3.5"
         >
-          <Plus size={14} aria-hidden /> New Lead
+          <Plus size={14} aria-hidden />
+          <span className="hidden sm:inline">New Lead</span>
         </button>
       </div>
     </header>

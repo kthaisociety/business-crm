@@ -10,7 +10,7 @@ type Props = {
 
 export default function KanbanBoard({ deals, showCanceled, onSelect, onMove }: Props) {
   return (
-    <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-6 pb-6">
+    <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-4 pb-6 md:px-6">
       {STATUSES.filter((s) => showCanceled || s.id !== 'canceled').map((status) => (
         <KanbanColumn
           key={status.id}

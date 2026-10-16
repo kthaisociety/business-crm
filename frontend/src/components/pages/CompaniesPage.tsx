@@ -77,11 +77,15 @@ export default function CompaniesPage({ companies, contacts, deals, query, onSel
                     {latest ? `${latest.semester} · ${statusLabel(latest.status)}` : <span className="text-gray-400">No deals yet</span>}
                   </td>
                   <td className={cell}>
-                    <div className="flex -space-x-1.5">
-                      {owners.map((p) => (
-                        <OwnerAvatar key={p.id} owner={p} />
-                      ))}
-                    </div>
+                    {owners.length === 0 ? (
+                      '—'
+                    ) : (
+                      <div className="flex -space-x-0.5">
+                        {owners.map((p) => (
+                          <OwnerAvatar key={p.id} owner={p} />
+                        ))}
+                      </div>
+                    )}
                   </td>
                   <td className={`${cell} whitespace-nowrap`}>{confirmedSEK ? formatSEK(confirmedSEK) : '—'}</td>
                   <td className={cell}>

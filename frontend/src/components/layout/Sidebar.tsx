@@ -2,6 +2,7 @@ import { BarChart3, Building2, KanbanSquare, LogOut, Mail, UserCog, Users } from
 import { NavLink } from 'react-router'
 import type { User } from '../../api'
 import { canSeeReports } from '../../data/deals'
+import OwnerAvatar from '../OwnerAvatar'
 
 type Props = {
   user: User | null
@@ -37,23 +38,41 @@ export default function Sidebar({ user, userError, onSignOut }: Props) {
         ))}
       </nav>
 
-      <div className="mt-6 rounded-lg border border-indigo-100 bg-indigo-50/60 p-3">
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-indigo-700">
-          <Mail size={14} aria-hidden /> Email and meeting sync are coming
-        </div>
-        <p className="mt-1.5 text-[11px] leading-relaxed text-indigo-900/70">
-          Soon, emails with a contact and Fathom meeting notes will land on the deal's timeline on their own.
-          Until then, add a quick note after each touchpoint: it resets the follow-up timer.
-        </p>
-      </div>
+      <p
+        title="Soon, emails with a contact and Fathom meeting notes will land on the deal's timeline on their own. Until then, add a quick note after each touchpoint: it resets the follow-up timer."
+        className="mt-auto flex items-center gap-1.5 px-2.5 pb-3 text-[11px] text-gray-400"
+      >
+        <Mail size={12} aria-hidden /> Email and meeting sync: coming soon
+      </p>
 
-      <div className="mt-auto border-t border-gray-100 pt-3 text-[11px] text-gray-500">
-        {user && <p>Signed in as {user.email}</p>}
-        {user?.role && <p className="mt-0.5 text-gray-400 capitalize">{user.role}</p>}
-        {user?.canSignOut && (
-          <button type="button" onClick={onSignOut} className="mt-2 flex items-center gap-1.5 text-gray-500 hover:text-gray-900">
-            <LogOut size={12} aria-hidden /> Sign out
-          </button>
+      <div className="border-t border-gray-100 pt-3 text-[11px] text-gray-500">
+        {user && (
+          <div className="flex items-center gap-2">
+            <OwnerAvatar owner={{ id: user.memberId ?? user.sub, name: user.name || user.email, email: user.email }} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-semibold text-gray-900">{user.name || user.email}</p>
+              <p className="sr-only">Signed in as {user.email}</p>
+              <p className="truncate" title={user.email} aria-hidden>
+                {user.email}
+              </p>
+            </div>
+            {user.canSignOut && (
+              <button
+                type="button"
+                onClick={onSignOut}
+                aria-label="Sign out"
+                title="Sign out"
+                className="rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-900"
+              >
+                <LogOut size={14} aria-hidden />
+              </button>
+            )}
+          </div>
+        )}
+        {user?.role && (
+          <span className="mt-2 inline-block rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold text-gray-600 capitalize">
+            {user.role}
+          </span>
         )}
         {userError && <p className="text-red-600">{userError}</p>}
         {!user && !userError && <p>Loading…</p>}

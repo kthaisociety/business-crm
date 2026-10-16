@@ -1,6 +1,7 @@
 import { useState, type DragEvent } from 'react'
 import type { Deal, Status } from '../../data/deals'
 import { formatSEK } from '../../format'
+import { statusColors } from '../statusColors'
 import DealCard from './DealCard'
 import { DEAL_DRAG_TYPE } from './drag'
 
@@ -43,12 +44,13 @@ export default function KanbanColumn({ status, label, deals, onSelect, onMove }:
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      className={`flex w-72 shrink-0 flex-col rounded-xl p-2 transition-colors ${
+      className={`flex w-64 shrink-0 flex-col rounded-xl p-2 transition-colors md:w-auto md:min-w-56 md:flex-1 md:basis-0 ${
         over ? 'bg-indigo-50 ring-2 ring-indigo-200' : 'bg-gray-100/70'
       }`}
     >
       <header className="flex items-center justify-between px-1.5 pt-1 pb-2.5">
         <div className="flex items-center gap-2">
+          <span className={`h-2 w-2 rounded-full ${statusColors[status]}`} aria-hidden />
           <h2 className="font-display text-xs font-bold text-gray-700">{label}</h2>
           <span className="rounded-full bg-white px-1.5 text-[11px] font-semibold text-gray-500">
             {deals.length}
