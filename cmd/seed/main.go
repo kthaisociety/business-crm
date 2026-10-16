@@ -1,8 +1,10 @@
-// Command seed fills an empty local database with made-up companies, contacts and deals, so the app has something to show in
-// development. Everything here is fictional (docs/pcr/0007): companies, people, @example.com addresses
-// and fees. It refuses to touch a database that already has deals. Run it after `docker compose up -d`:
+// Command seed fills an empty database with made-up companies, contacts and deals, so the app has something to
+// show locally and on staging (docs/adr/0007). Everything here is fictional (docs/pcr/0007): companies,
+// people, @example.com addresses and fees. It refuses to touch a database that already has deals. Run it
+// after `docker compose up -d`, or once on staging from the image:
 //
 //	go run ./cmd/seed
+//	./business-crm-seed
 package main
 
 import (
