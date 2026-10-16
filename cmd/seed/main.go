@@ -1,8 +1,10 @@
-// Command seed fills an empty local database with made-up companies, contacts and deals, so the app has something to show in
-// development. Everything here is fictional (docs/pcr/0007): companies, people, @example.com addresses
-// and fees. It refuses to touch a database that already has deals. Run it after `docker compose up -d`:
+// Command seed fills an empty database with made-up companies, contacts and deals, so the app has something to
+// show locally and on staging (docs/adr/0007). Everything here is fictional (docs/pcr/0007): companies,
+// people, @example.com addresses and fees. It refuses to touch a database that already has deals. Run it
+// after `docker compose up -d`, or once on staging from the image:
 //
 //	go run ./cmd/seed
+//	./business-crm-seed
 package main
 
 import (
@@ -57,7 +59,9 @@ func main() {
 func seed(tx *gorm.DB) error {
 	members := map[string]*deals.Member{}
 	for _, m := range []deals.Member{
-		{Email: "alva.lindqvist@example.com", Name: "Alva Lindqvist", Role: "admin"},
+		// No made-up admins: on staging the first admin is a real person, appointed with appoint-admin, which
+		// refuses while the team has one (docs/adr/0005, 0007). Locally the dev user is made admin below.
+		{Email: "alva.lindqvist@example.com", Name: "Alva Lindqvist", Role: "board"},
 		{Email: "oskar.berg@example.com", Name: "Oskar Berg", Role: "board"},
 		{Email: "maja.holm@example.com", Name: "Maja Holm", Role: "board"},
 		{Email: "noah.ek@example.com", Name: "Noah Ek"},

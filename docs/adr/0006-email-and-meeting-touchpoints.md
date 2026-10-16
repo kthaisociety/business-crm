@@ -1,6 +1,6 @@
 # 0006. Emails and meetings become touchpoints on their own
 
-Status: Accepted
+Status: Accepted; "there's no staging" superseded by 0007
 
 ## Context
 A deal's timeline and its follow-up nudge (no touchpoint for 4 days) only know what members type in as

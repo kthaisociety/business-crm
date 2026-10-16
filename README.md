@@ -156,6 +156,16 @@ PRs need a Conventional Commit title; every merge to `main` builds `ghcr.io/ktha
 and deploys it to staging; merging the release PR releases `X.Y.Z` for production. Frontend and backend
 share one version.
 
+| Environment | URL | Data |
+|---|---|---|
+| Live | `https://lucid.kthais.com` | the team's real deals; members connect Gmail; the team's Fathom webhook |
+| Staging | `https://lucid-stg.kthais.com` | made-up only: the seed (`./business-crm-seed`, once), test meetings, testers' own mail |
+
+Each has its own Google OAuth client (callbacks `/auth/callback` and `/auth/gmail/callback` on its own
+URL), `TOKEN_ENCRYPTION_KEY`, Fathom secret and first admin (`./business-crm appoint-admin`, also on
+staging: the seed makes no one an admin there, so the order doesn't matter)
+([ADR 0007](docs/adr/0007-staging-holds-made-up-data.md)).
+
 ## Docs
 
 - [`CONTEXT.md`](CONTEXT.md): vocabulary
