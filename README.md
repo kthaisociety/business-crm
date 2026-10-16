@@ -156,7 +156,8 @@ share one version.
 | Staging | `https://lucid-stg.kthais.com` | made-up only: the seed (`./business-crm-seed`, once), test meetings, testers' own mail |
 
 Each has its own Google OAuth client (callbacks `/auth/callback` and `/auth/gmail/callback` on its own
-URL), `TOKEN_ENCRYPTION_KEY`, Fathom secret and first admin
+URL), `TOKEN_ENCRYPTION_KEY`, Fathom secret and first admin (`./business-crm appoint-admin`, also on
+staging: the seed makes no one an admin there, so the order doesn't matter)
 ([ADR 0007](docs/adr/0007-staging-holds-made-up-data.md)).
 
 ## Docs

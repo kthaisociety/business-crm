@@ -13,7 +13,8 @@ real records.
 - **Live** holds the team's real deals, companies and contacts, and is where members connect Gmail and
   the team's Fathom webhook points.
 - **Staging** holds made-up data only:
-  - Its deals come from the seed, run once in the image: `./business-crm-seed`.
+  - Its deals come from the seed, run once in the image: `./business-crm-seed`. The seed makes no one
+    an admin there, so its first admin is appointed as live's is (ADR 0005), before or after seeding.
   - The team's Fathom webhook never points at it. Someone trying Fathom there adds their own webhook for
     their own recordings only, and holds test meetings.
   - Only people trying Gmail connect there, with contacts on their own addresses, as locally.

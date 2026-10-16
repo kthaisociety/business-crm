@@ -59,7 +59,9 @@ func main() {
 func seed(tx *gorm.DB) error {
 	members := map[string]*deals.Member{}
 	for _, m := range []deals.Member{
-		{Email: "alva.lindqvist@example.com", Name: "Alva Lindqvist", Role: "admin"},
+		// No made-up admins: on staging the first admin is a real person, appointed with appoint-admin, which
+		// refuses while the team has one (docs/adr/0005, 0007). Locally the dev user is made admin below.
+		{Email: "alva.lindqvist@example.com", Name: "Alva Lindqvist", Role: "board"},
 		{Email: "oskar.berg@example.com", Name: "Oskar Berg", Role: "board"},
 		{Email: "maja.holm@example.com", Name: "Maja Holm", Role: "board"},
 		{Email: "noah.ek@example.com", Name: "Noah Ek"},
