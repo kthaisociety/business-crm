@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/kthaisociety/business-crm/internal/secretbox"
+	"github.com/kthaisociety/lucid/internal/secretbox"
 )
 
 // Scope reads a mailbox: headers, snippets and bodies, never sending or changing anything.

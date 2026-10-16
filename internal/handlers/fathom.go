@@ -7,8 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/kthaisociety/business-crm/internal/deals"
-	"github.com/kthaisociety/business-crm/internal/fathom"
+	"github.com/kthaisociety/lucid/internal/deals"
+	"github.com/kthaisociety/lucid/internal/fathom"
 )
 
 // A meeting's summary and action items are larger than anything the app's own forms send.

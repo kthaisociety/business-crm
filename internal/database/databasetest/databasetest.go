@@ -16,7 +16,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
-	"github.com/kthaisociety/business-crm/internal/database"
+	"github.com/kthaisociety/lucid/internal/database"
 )
 
 // Open creates a database, applies every migration to it, and drops it when the test ends.

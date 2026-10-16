@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/kthaisociety/business-crm/internal/auth"
+	"github.com/kthaisociety/lucid/internal/auth"
 )
 
 var builtUI = fstest.MapFS{

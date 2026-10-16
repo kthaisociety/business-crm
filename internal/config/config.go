@@ -7,10 +7,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kthaisociety/business-crm/internal/auth"
-	"github.com/kthaisociety/business-crm/internal/fathom"
-	"github.com/kthaisociety/business-crm/internal/gmail"
-	"github.com/kthaisociety/business-crm/internal/secretbox"
+	"github.com/kthaisociety/lucid/internal/auth"
+	"github.com/kthaisociety/lucid/internal/fathom"
+	"github.com/kthaisociety/lucid/internal/gmail"
+	"github.com/kthaisociety/lucid/internal/secretbox"
 )
 
 type Config struct {

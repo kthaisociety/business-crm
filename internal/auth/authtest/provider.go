@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	ClientID     = "business-crm-test"
+	ClientID     = "lucid-test"
 	ClientSecret = "test-secret"
 )
 

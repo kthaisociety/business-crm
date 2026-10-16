@@ -14,9 +14,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/kthaisociety/business-crm/internal/database/databasetest"
-	"github.com/kthaisociety/business-crm/internal/deals"
-	"github.com/kthaisociety/business-crm/internal/fathom"
+	"github.com/kthaisociety/lucid/internal/database/databasetest"
+	"github.com/kthaisociety/lucid/internal/deals"
+	"github.com/kthaisociety/lucid/internal/fathom"
 )
 
 // Fathom posts finished meetings (docs/adr/0006). The payload names Lina Dahl at granit.example and

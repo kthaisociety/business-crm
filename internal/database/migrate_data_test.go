@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
-	"github.com/kthaisociety/business-crm/internal/database"
-	"github.com/kthaisociety/business-crm/internal/database/databasetest"
+	"github.com/kthaisociety/lucid/internal/database"
+	"github.com/kthaisociety/lucid/internal/database/databasetest"
 )
 
 // migrationsUpTo is the real migrations folder, cut off after the named file.

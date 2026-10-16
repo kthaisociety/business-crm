@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/kthaisociety/business-crm/internal/deals"
+	"github.com/kthaisociety/lucid/internal/deals"
 )
 
 func TestCompaniesAndContactsLifecycle(t *testing.T) {

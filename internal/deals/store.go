@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/kthaisociety/business-crm/internal/auth"
+	"github.com/kthaisociety/lucid/internal/auth"
 )
 
 var ErrNotFound = errors.New("deal not found")

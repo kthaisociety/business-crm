@@ -1,4 +1,4 @@
-module github.com/kthaisociety/business-crm
+module github.com/kthaisociety/lucid
 
 go 1.26.3
 

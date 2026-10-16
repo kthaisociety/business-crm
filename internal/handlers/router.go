@@ -11,9 +11,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/kthaisociety/business-crm/internal/auth"
-	"github.com/kthaisociety/business-crm/internal/deals"
-	"github.com/kthaisociety/business-crm/internal/gmail"
+	"github.com/kthaisociety/lucid/internal/auth"
+	"github.com/kthaisociety/lucid/internal/deals"
+	"github.com/kthaisociety/lucid/internal/gmail"
 )
 
 type Deps struct {
@@ -72,10 +72,10 @@ func NewRouter(d Deps) *gin.Engine {
 func health(pingDB func(ctx context.Context) error) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if err := pingDB(c.Request.Context()); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"service": "business-crm", "status": "unhealthy", "database": err.Error()})
+			c.JSON(http.StatusServiceUnavailable, gin.H{"service": "lucid", "status": "unhealthy", "database": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"service": "business-crm", "status": "healthy"})
+		c.JSON(http.StatusOK, gin.H{"service": "lucid", "status": "healthy"})
 	}
 }
 

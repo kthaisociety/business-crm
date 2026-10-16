@@ -1,4 +1,4 @@
-# business-crm
+# Lucid
 
 The KTHAIS business team's CRM: the business team's deal log as a board and a list, with follow-up nudges.
 People sign in with their @kthais.com Google account, through OIDC, and only if an admin has added them to
@@ -52,7 +52,7 @@ A new environment has no admin. Run this once, from the same image, for whoever 
 head of business):
 
 ```sh
-./business-crm appoint-admin -name "Their Name" them@kthais.com   # in the image, from /app
+./lucid appoint-admin -name "Their Name" them@kthais.com        # in the image, from /app
 go run ./cmd/server appoint-admin them@kthais.com               # locally
 ```
 
@@ -110,7 +110,7 @@ The schema is SQL files in `internal/database/migrations/`, applied by the serve
 
 | Route | Returns |
 |---|---|
-| `GET /api/health` | `{"service":"business-crm","status":"healthy"}`, or 503 if the database is unreachable |
+| `GET /api/health` | `{"service":"lucid","status":"healthy"}`, or 503 if the database is unreachable |
 | `GET /auth/login` | starts signing in: redirects to the OIDC provider |
 | `GET /auth/callback` | finishes signing in, and redirects to `/`, or to `/?sign-in=not-on-team`, `domain` or `failed` |
 | `POST /auth/logout` | signs this browser out: 204 |
@@ -152,17 +152,17 @@ All from env, read by the Go server ([PCR 0001](docs/pcr/0001-config-from-env.md
 ## Delivery
 
 Like every KTHAIS app ([infrastructure/docs/app-delivery.md](https://github.com/kthaisociety/infrastructure/blob/main/docs/app-delivery.md)):
-PRs need a Conventional Commit title; every merge to `main` builds `ghcr.io/kthaisociety/business-crm:sha-<7>`
+PRs need a Conventional Commit title; every merge to `main` builds `ghcr.io/kthaisociety/lucid:sha-<7>`
 and deploys it to staging; merging the release PR releases `X.Y.Z` for production. Frontend and backend
 share one version.
 
 | Environment | URL | Data |
 |---|---|---|
 | Live | `https://lucid.kthais.com` | the team's real deals; members connect Gmail; the team's Fathom webhook |
-| Staging | `https://lucid-stg.kthais.com` | made-up only: the seed (`./business-crm-seed`, once), test meetings, testers' own mail |
+| Staging | `https://lucid-stg.kthais.com` | made-up only: the seed (`./lucid-seed`, once), test meetings, testers' own mail |
 
 Each has its own Google OAuth client (callbacks `/auth/callback` and `/auth/gmail/callback` on its own
-URL), `TOKEN_ENCRYPTION_KEY`, Fathom secret and first admin (`./business-crm appoint-admin`, also on
+URL), `TOKEN_ENCRYPTION_KEY`, Fathom secret and first admin (`./lucid appoint-admin`, also on
 staging: the seed makes no one an admin there, so the order doesn't matter)
 ([ADR 0007](docs/adr/0007-staging-holds-made-up-data.md)).
 

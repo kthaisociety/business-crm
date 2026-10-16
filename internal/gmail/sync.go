@@ -20,7 +20,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
-	"github.com/kthaisociety/business-crm/internal/deals"
+	"github.com/kthaisociety/lucid/internal/deals"
 )
 
 // API is the Gmail REST API for the mailbox a client acts for; tests point it at a fake.
