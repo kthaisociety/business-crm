@@ -52,7 +52,7 @@ A new environment has no admin. Run this once, from the same image, for whoever 
 head of business):
 
 ```sh
-business-crm appoint-admin -name "Their Name" them@kthais.com   # in the image
+./business-crm appoint-admin -name "Their Name" them@kthais.com   # in the image, from /app
 go run ./cmd/server appoint-admin them@kthais.com               # locally
 ```
 

@@ -103,7 +103,7 @@ func appointAdmin(cfg *config.Config, args []string) {
 	name := flags.String("name", "", "their name until they sign in (default: the email's local part)")
 	force := flags.Bool("force", false, "appoint even though the team has an admin (recovery only)")
 	flags.Usage = func() {
-		fmt.Fprintln(flags.Output(), "usage: business-crm appoint-admin [-name NAME] [-force] EMAIL")
+		fmt.Fprintln(flags.Output(), "usage: ./business-crm appoint-admin [-name NAME] [-force] EMAIL")
 		flags.PrintDefaults()
 	}
 	_ = flags.Parse(args)

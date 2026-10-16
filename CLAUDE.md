@@ -9,7 +9,7 @@ the API under `/api` and an embedded Vite + React frontend everywhere else.
 - Local Postgres: `docker compose up -d`
 - Config: `cp .env.example .env`
 - Made-up data for local dev: `go run ./cmd/seed` (once, on an empty database; makes the dev user an admin)
-- A new environment's first admin: `business-crm appoint-admin EMAIL`, once (ADR 0005)
+- A new environment's first admin: `./business-crm appoint-admin EMAIL` in the image (in `/app`), once (ADR 0005)
 - Backend: `go run ./cmd/server` (on `127.0.0.1:8002`)
 - Frontend dev: `cd frontend && npm install && npm run dev` (Vite on 5174, proxies `/api` to 8002)
 - All checks: `make test` (needs `docker compose up -d`, and `npm install` in `frontend/` once)

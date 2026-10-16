@@ -262,11 +262,10 @@ func (s *Store) HandOverAdmin(ctx context.Context, by auth.User, to, stepDownTo 
 	return viewOfMember(me), err
 }
 
-// keepAnAdmin refuses demoting or removing the member with this id if they're the last admin. It locks
-// the admins' rows until the transaction ends, so two requests demoting or removing different admins at
-// once take turns: the second sees the first's change, and can't leave the team without an admin. The lock
-// is FOR NO KEY UPDATE, which lets a new deal's foreign-key check on an admin through: FOR UPDATE would
-// wait for it, and deadlock with a lead whose author is another admin.
+// keepAnAdmin refuses demoting or removing the member with this id if they're the last admin. It takes
+// the admin lock (lockAdmins), so two changes at once take turns: the second sees the first's change, and
+// can't leave the team without an admin. Being an advisory lock, it never blocks a new deal's foreign-key
+// check on an admin, so it can't deadlock with a lead whose author is another admin.
 func keepAnAdmin(tx *gorm.DB, id string) error {
 	admins, err := lockAdmins(tx)
 	if err != nil {
@@ -279,10 +278,17 @@ func keepAnAdmin(tx *gorm.DB, id string) error {
 	return nil
 }
 
-// lockAdmins reads the admins and locks their rows until the transaction ends, always in the same order,
-// so changes to who is admin take turns.
+// adminLock is the advisory lock that changes to who is admin take turns on.
+const adminLock = 0x63726d61646d696e // "crmadmin"
+
+// lockAdmins makes changes to who is admin take turns: appointing, handing over, demoting and removing
+// all take one lock until their transaction ends, and only then read the admins. Locking the admins' rows
+// alone isn't enough: a change waiting on them wouldn't see someone another change has just made admin.
 func lockAdmins(tx *gorm.DB) ([]Member, error) {
+	if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", adminLock).Error; err != nil {
+		return nil, err
+	}
 	var admins []Member
-	err := tx.Clauses(clause.Locking{Strength: "NO KEY UPDATE"}).Where("role = 'admin'").Order("id").Find(&admins).Error
+	err := tx.Where("role = 'admin'").Order("id").Find(&admins).Error
 	return admins, err
 }

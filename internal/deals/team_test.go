@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 
 	"github.com/kthaisociety/business-crm/internal/auth"
 	"github.com/kthaisociety/business-crm/internal/database/databasetest"
@@ -283,15 +284,16 @@ func TestTeamChangesDoNotDeadlockWithNewLeads(t *testing.T) {
 		_, err := s.UpdateMember(ctx, other.ID, map[string]any{"role": "board"})
 		changed <- err
 	}()
-	require.Eventually(t, func() bool {
-		var waiting int64
-		db.Raw("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()").Scan(&waiting)
-		return waiting > 0
-	}, 5*time.Second, 10*time.Millisecond, "the team change waits for the author's row")
+	// The team change doesn't wait on the author's row: admin changes take an advisory lock, not rows.
+	select {
+	case err := <-changed:
+		assert.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the team change waits on the lead")
+	}
 
 	require.NoError(t, lead.Exec("SELECT 1 FROM members WHERE id = ? FOR KEY SHARE", owner).Error)
 	require.NoError(t, lead.Commit().Error)
-	assert.NoError(t, <-changed)
 }
 
 // With real sign-in (docs/adr/0004), someone removed from the team while signing in, or while a request
@@ -334,4 +336,94 @@ func TestOnlyTeamMembersLetsNoOneElseIn(t *testing.T) {
 	_, err := s.Admit(context.Background(), auth.User{Email: "maja@example.com", Name: "Maja Holm"})
 
 	assert.ErrorIs(t, err, deals.ErrNotOnTeam)
+}
+
+// waitForLockWaits waits until n queries in db's database are waiting on a lock.
+func waitForLockWaits(t *testing.T, db *gorm.DB, n int64) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		var waiting int64
+		db.Raw("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()").Scan(&waiting)
+		return waiting >= n
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func adminCount(t *testing.T, s *deals.Store) int {
+	t.Helper()
+	team, err := s.ListMembers(context.Background())
+	require.NoError(t, err)
+	admins := 0
+	for _, m := range team {
+		if m.Role == "admin" {
+			admins++
+		}
+	}
+	return admins
+}
+
+// A demotion of the new admin that waits on a hand-over sees the hand-over's result: B is then the last
+// admin, so demoting B is refused.
+func TestADemotionWaitingOnAHandOverKeepsAnAdmin(t *testing.T) {
+	db := databasetest.Open(t)
+	s := deals.NewStore(db)
+	ctx := context.Background()
+	appoint(t, s, alva)
+	next, err := s.AddMember(ctx, deals.MemberInput{Email: oskar.Email, Name: oskar.Name})
+	require.NoError(t, err)
+
+	// Hold the hand-over up partway, until the demotion is waiting on it too.
+	holdup := db.Begin()
+	defer holdup.Rollback()
+	require.NoError(t, holdup.Exec("SELECT 1 FROM members WHERE id = ? FOR UPDATE", next.ID).Error)
+	handedOver := make(chan error, 1)
+	go func() {
+		_, err := s.HandOverAdmin(ctx, alva, next.ID, "member")
+		handedOver <- err
+	}()
+	waitForLockWaits(t, db, 1)
+	demoted := make(chan error, 1)
+	go func() {
+		_, err := s.UpdateMember(ctx, next.ID, map[string]any{"role": "member"})
+		demoted <- err
+	}()
+	waitForLockWaits(t, db, 2)
+	require.NoError(t, holdup.Commit().Error)
+
+	require.NoError(t, <-handedOver)
+	conflictError(t, <-demoted)
+	assert.Equal(t, 1, adminCount(t, s))
+}
+
+// Two first appointments at once: the second sees the first's admin and is refused.
+func TestTwoFirstAppointmentsAtOnce(t *testing.T) {
+	db := databasetest.Open(t)
+	s := deals.NewStore(db)
+	ctx := context.Background()
+
+	// Hold the first appointment up at its insert, until the second has started.
+	holdup := db.Begin()
+	defer holdup.Rollback()
+	require.NoError(t, holdup.Exec("INSERT INTO members (email, name) VALUES (?, 'Holdup')", alva.Email).Error)
+	first := make(chan error, 1)
+	go func() {
+		_, err := s.AppointAdmin(ctx, alva.Email, "", false)
+		first <- err
+	}()
+	waitForLockWaits(t, db, 1)
+	second := make(chan error, 1)
+	go func() {
+		_, err := s.AppointAdmin(ctx, oskar.Email, "", false)
+		second <- err
+	}()
+	// With admin changes serialized the second waits on the first; without, it's done already.
+	select {
+	case err := <-second:
+		second <- err
+	case <-time.After(300 * time.Millisecond):
+	}
+	require.NoError(t, holdup.Rollback().Error)
+
+	require.NoError(t, <-first)
+	conflictError(t, <-second)
+	assert.Equal(t, 1, adminCount(t, s))
 }

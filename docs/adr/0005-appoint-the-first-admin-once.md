@@ -11,7 +11,7 @@ their holder.
 
 ## Decision
 - No `ADMIN_EMAILS`. A new environment gets its first admin from a command, run once from the same image:
-  `business-crm appoint-admin [-name NAME] EMAIL`. It adds that person to the team as an admin.
+  `./business-crm appoint-admin [-name NAME] EMAIL` (in `/app`). It adds that person to the team as an admin.
 - While the team has an admin the command refuses: admins hand over in the app. `-force` appoints one
   anyway, for recovery when every admin has left without handing over.
 - On the Team page an admin hands over: they pick a teammate, who becomes an admin, and they step down to
