@@ -197,45 +197,55 @@ func (r *run) sync(ctx context.Context) error {
 	return r.backfill(ctx)
 }
 
-// backfill reads the last Backfill of mail page by page, saving its place after each message, and moves
-// the checkpoint to where it started once it's done.
+// backfill reads the Backfill of mail before it started, page by page, saving the last message it
+// recorded, and moves the checkpoint to where it started once it's done. The window is fixed, so mail
+// arriving meanwhile (which history brings later) can't shift the pages; a resumed page carries on after
+// the last recorded message, or reads the page again if that message is gone from it.
 func (r *run) backfill(ctx context.Context) error {
-	if r.row.BackfillHistory == nil {
+	if r.row.BackfillHistory == nil || r.row.BackfillUntil == nil {
 		// Taken before listing, so nothing that arrives meanwhile is missed.
 		start, err := r.m.historyID(ctx)
 		if err != nil {
 			return err
 		}
-		empty := ""
-		r.row.BackfillHistory, r.row.BackfillPage = &start, &empty
-		if err := r.save(map[string]any{"backfill_history": start, "backfill_page": "", "backfill_done": 0, "history_id": nil}); err != nil {
-			return err
-		}
-	}
-	page, done := "", r.row.BackfillDone
-	if r.row.BackfillPage != nil {
-		page = *r.row.BackfillPage
-	}
-	for {
-		ids, next, err := r.m.recent(ctx, Backfill, page)
+		until, empty := time.Now().Truncate(time.Second), ""
+		r.row.BackfillHistory, r.row.BackfillUntil, r.row.BackfillPage, r.row.BackfillLast = &start, &until, &empty, nil
+		err = r.save(map[string]any{"backfill_history": start, "backfill_until": until, "backfill_page": "", "backfill_last": nil, "history_id": nil})
 		if err != nil {
 			return err
 		}
-		for i := min(done, len(ids)); i < len(ids); i++ {
-			if err := r.recordOne(ctx, ids[i]); err != nil {
+	}
+	page, last := "", ""
+	if r.row.BackfillPage != nil {
+		page = *r.row.BackfillPage
+	}
+	if r.row.BackfillLast != nil {
+		last = *r.row.BackfillLast
+	}
+	for {
+		ids, next, err := r.m.recent(ctx, r.row.BackfillUntil.Add(-Backfill), *r.row.BackfillUntil, page)
+		if err != nil {
+			return err
+		}
+		from := 0
+		if i := slices.Index(ids, last); last != "" && i >= 0 {
+			from = i + 1
+		}
+		for _, id := range ids[from:] {
+			if err := r.recordOne(ctx, id); err != nil {
 				return err
 			}
-			if err := r.save(map[string]any{"backfill_done": i + 1}); err != nil {
+			if err := r.save(map[string]any{"backfill_last": id}); err != nil {
 				return err
 			}
 		}
 		if next == "" {
-			return r.save(map[string]any{"history_id": *r.row.BackfillHistory, "backfill_history": nil, "backfill_page": nil, "backfill_done": 0})
+			return r.save(map[string]any{"history_id": *r.row.BackfillHistory, "backfill_history": nil, "backfill_until": nil, "backfill_page": nil, "backfill_last": nil})
 		}
-		if err := r.save(map[string]any{"backfill_page": next, "backfill_done": 0}); err != nil {
+		if err := r.save(map[string]any{"backfill_page": next, "backfill_last": nil}); err != nil {
 			return err
 		}
-		page, done = next, 0
+		page, last = next, ""
 	}
 }
 
@@ -417,10 +427,10 @@ func (m *mailbox) historyID(ctx context.Context) (string, error) {
 	return profile.HistoryID, err
 }
 
-// recent lists one page of the ids of messages from the last `back`, and the next page's token, or ""
-// on the last page.
-func (m *mailbox) recent(ctx context.Context, back time.Duration, pageToken string) ([]string, string, error) {
-	q := url.Values{"q": {fmt.Sprintf("newer_than:%dd", int(back.Hours()/24))}, "maxResults": {"100"}}
+// recent lists one page of the ids of messages received in [after, before), and the next page's token,
+// or "" on the last page.
+func (m *mailbox) recent(ctx context.Context, after, before time.Time, pageToken string) ([]string, string, error) {
+	q := url.Values{"q": {fmt.Sprintf("after:%d before:%d", after.Unix(), before.Unix())}, "maxResults": {"100"}}
 	if pageToken != "" {
 		q.Set("pageToken", pageToken)
 	}

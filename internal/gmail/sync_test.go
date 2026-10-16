@@ -3,6 +3,7 @@ package gmail_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -31,7 +32,8 @@ type fakeGmail struct {
 	t        *testing.T
 	mu       sync.Mutex
 	messages map[string]map[string]map[string]any // token → message id → message
-	recent   map[string][]string                  // token → ids the backfill lists
+	recent   map[string][]string                  // token → ids the backfill lists, newest first
+	received map[string]time.Time                 // message id → when it came in
 	changes  map[string][]change                  // token → changes, in order
 	seq      int                                  // the latest change's history id
 	oldest   int                                  // history before this is gone
@@ -52,7 +54,7 @@ type change struct {
 }
 
 func newFakeGmail(t *testing.T) *fakeGmail {
-	f := &fakeGmail{t: t, messages: map[string]map[string]map[string]any{}, recent: map[string][]string{}, changes: map[string][]change{}, seq: 100, fetched: map[string]int{}}
+	f := &fakeGmail{t: t, messages: map[string]map[string]map[string]any{}, recent: map[string][]string{}, changes: map[string][]change{}, seq: 100, fetched: map[string]int{}, received: map[string]time.Time{}}
 	srv := httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(srv.Close)
 	before := gmail.API
@@ -79,9 +81,28 @@ func (f *fakeGmail) mail(token, id, from, to, subject string, labels []string, a
 	if added {
 		f.seq++
 		f.changes[token] = append(f.changes[token], change{seq: f.seq, id: id})
+		f.received[id] = time.Now()
 	} else {
 		f.recent[token] = append(f.recent[token], id)
+		f.received[id] = time.Now().Add(-time.Hour)
 	}
+}
+
+// arrive is new mail coming in now: first in the mailbox's list, and a new change.
+func (f *fakeGmail) arrive(token, id, from, to, subject string) {
+	f.mail(token, id, from, to, subject, nil, true)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recent[token] = append([]string{id}, f.recent[token]...)
+	f.received[id] = time.Now().Add(time.Minute)
+}
+
+// remove deletes a message from the mailbox.
+func (f *fakeGmail) remove(token, id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recent[token] = slices.DeleteFunc(f.recent[token], func(m string) bool { return m == id })
+	delete(f.messages[token], id)
 }
 
 // restore takes a message out of spam or trash, into the inbox.
@@ -132,10 +153,16 @@ func (f *fakeGmail) serve(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/profile":
 		write(map[string]string{"historyId": strconv.Itoa(f.seq)})
 	case r.URL.Path == "/messages":
-		if q.Get("q") != "newer_than:30d" {
-			f.t.Errorf("backfill asked q=%q", q.Get("q"))
+		var after, before int64
+		if _, err := fmt.Sscanf(q.Get("q"), "after:%d before:%d", &after, &before); err != nil || before-after != 30*24*3600 {
+			f.t.Errorf("backfill asked q=%q, not 30 days up to its start", q.Get("q"))
 		}
-		list := f.recent[token]
+		var list []string
+		for _, id := range f.recent[token] {
+			if at := f.received[id].Unix(); at >= after && at < before {
+				list = append(list, id)
+			}
+		}
 		f.pages = append(f.pages, q.Get("pageToken"))
 		from, to, next := f.page(len(list), q.Get("pageToken"))
 		page := []map[string]string{}
@@ -620,4 +647,35 @@ func TestAHistoryPageLongerThanTheDeadlineStillGetsDone(t *testing.T) {
 	assert.Len(t, w.emails(t), 4)
 	assert.Equal(t, "104", w.historyID(t))
 	assert.Equal(t, 1, f.fetched["n1"])
+}
+
+// Mail deleted, or arriving, while a backfill is cut off doesn't make the resumed backfill skip anything:
+// it carries on after the last message it recorded, and new mail is history's to bring.
+func TestAResumedBackfillMissesNothingWhenTheMailboxChanges(t *testing.T) {
+	f := newFakeGmail(t)
+	w := newWorld(t)
+	w.connect(t, "maja@example.com")
+	tok := "token-maja@example.com"
+	for _, id := range []string{"m1", "m2", "m3", "m4"} {
+		f.mail(tok, id, "lina.dahl@granit.example", "maja@example.com", "Mail "+id, nil, false)
+	}
+	defer gmail.SetSyncTimeout(300 * time.Millisecond)()
+	f.stallOn = "/messages/m3"
+	release := f.stall()
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+	require.Len(t, w.emails(t), 2)
+
+	release()
+	f.stallOn = ""
+	f.remove(tok, "m1")
+	f.arrive(tok, "m0", "lina.dahl@granit.example", "maja@example.com", "Mail m0")
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+	require.NoError(t, w.syncer.SyncAll(context.Background()))
+
+	titles := []string{}
+	for _, e := range w.emails(t) {
+		titles = append(titles, e.Title)
+	}
+	assert.ElementsMatch(t, []string{"Mail m0", "Mail m1", "Mail m2", "Mail m3", "Mail m4"}, titles)
+	assert.Equal(t, 1, f.fetched["m2"], "carried on after m2, without reading it again")
 }
