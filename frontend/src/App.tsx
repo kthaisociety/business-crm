@@ -418,7 +418,7 @@ export default function App() {
         canAddLead={user !== null && data !== null}
         onNewLead={() => setAddingLead(true)}
       />
-      <MobileNav user={user} onSignOut={() => void leave()} />
+      <MobileNav user={user} onSignOut={() => void leave()} onDisconnectGmail={() => void disconnect()} />
       <GmailBar
         outcome={gmailOutcome}
         ask={user?.gmail === 'not-connected' && !gmailLater}

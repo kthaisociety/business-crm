@@ -1014,6 +1014,16 @@ test('a connected member can disconnect their Gmail', async () => {
   expect(api.requests.some((r) => r.method === 'DELETE' && r.path === '/api/gmail')).toBe(true)
 })
 
+test('phones can connect and disconnect Gmail too', async () => {
+  api = stubApi({ gmail: 'connected' })
+  await renderApp()
+  const phone = screen.getByRole('navigation', { name: 'Pages' })
+
+  fireEvent.click(within(phone).getByRole('button', { name: 'Disconnect Gmail' }))
+
+  expect(await within(phone).findByRole('link', { name: 'Connect Gmail' })).toHaveAttribute('href', '/auth/gmail/connect')
+})
+
 test('Team shows who has connected Gmail', async () => {
   api = stubApi({ gmail: 'connected' })
   renderAt('/team')

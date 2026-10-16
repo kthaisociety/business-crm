@@ -100,8 +100,17 @@ export default function Sidebar({ user, userError, onSignOut, onDisconnectGmail 
   )
 }
 
-// The sidebar is hidden on narrow screens; this row of tabs takes its place.
-export function MobileNav({ user, onSignOut }: { user: User | null; onSignOut: () => void }) {
+// The sidebar is hidden on narrow screens; this row of tabs takes its place, with the account actions
+// the sidebar's user chip has: Gmail, and signing out.
+export function MobileNav({
+  user,
+  onSignOut,
+  onDisconnectGmail,
+}: {
+  user: User | null
+  onSignOut: () => void
+  onDisconnectGmail: () => void
+}) {
   return (
     <nav aria-label="Pages" className="flex gap-1 overflow-x-auto border-b border-gray-200 bg-white px-4 py-2 md:hidden">
       {pagesFor(user).map(({ label, path }) => (
@@ -116,11 +125,23 @@ export function MobileNav({ user, onSignOut }: { user: User | null; onSignOut: (
           {label}
         </NavLink>
       ))}
-      {user?.canSignOut && (
-        <button type="button" onClick={onSignOut} className="ml-auto shrink-0 rounded-md px-2.5 py-1 text-xs text-gray-600">
-          Sign out
-        </button>
-      )}
+      <span className="ml-auto flex shrink-0 items-center gap-1">
+        {user?.gmail === 'connected' && (
+          <button type="button" onClick={onDisconnectGmail} className="rounded-md px-2.5 py-1 text-xs text-gray-600">
+            Disconnect Gmail
+          </button>
+        )}
+        {user?.gmail === 'not-connected' && (
+          <a href="/auth/gmail/connect" className="rounded-md px-2.5 py-1 text-xs text-indigo-700">
+            Connect Gmail
+          </a>
+        )}
+        {user?.canSignOut && (
+          <button type="button" onClick={onSignOut} className="rounded-md px-2.5 py-1 text-xs text-gray-600">
+            Sign out
+          </button>
+        )}
+      </span>
     </nav>
   )
 }
