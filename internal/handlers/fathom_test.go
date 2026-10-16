@@ -114,6 +114,13 @@ func TestAFathomMeetingLandsOnTheContactsOpenDeals(t *testing.T) {
 	// Fathom resends a webhook it thinks failed: still one meeting.
 	require.Equal(t, http.StatusNoContent, postMeeting(r, meetingPayload(t), fathomKey).Code)
 	assert.Len(t, meetingsOn(t, store, first.ID), 1)
+
+	// The summary is written again in Fathom and sent again: it replaces the old one, still once.
+	rewritten := bytes.Replace(meetingPayload(t), []byte("We agreed on a"), []byte("We settled on a"), 1)
+	require.Equal(t, http.StatusNoContent, postMeeting(r, rewritten, fathomKey).Code)
+	meetings := meetingsOn(t, store, first.ID)
+	require.Len(t, meetings, 1)
+	assert.Contains(t, meetings[0].Body, "We settled on a lunch lecture")
 }
 
 func TestWithNoOpenDealTheMeetingLandsOnTheLatest(t *testing.T) {

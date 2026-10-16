@@ -27,8 +27,9 @@ type Touchpoint struct {
 }
 
 // Record puts a touchpoint on the deals of every company with a contact on it: the company's open deals,
-// or its latest deal when none is open. It returns how many deals it was added to: 0 with no contact on
-// it, when nothing is stored, and 0 again when the same touchpoint is recorded twice.
+// or its latest deal when none is open. It returns how many deals it was added to or updated on: 0 with
+// no contact on it, when nothing is stored. The same touchpoint recorded again updates it in place, so a
+// Fathom summary written again replaces the old one, and it's never there twice.
 func (s *Store) Record(ctx context.Context, t Touchpoint) (int, error) {
 	emails := make([]string, 0, len(t.Emails))
 	for _, e := range t.Emails {
@@ -71,7 +72,10 @@ func (s *Store) Record(ctx context.Context, t Touchpoint) (int, error) {
 			points = []string{}
 		}
 		for _, dealID := range dealIDs {
-			res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&Activity{
+			res := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "deal_id"}, {Name: "source"}, {Name: "external_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"title", "body", "bullet_points", "url", "occurred_at"}),
+			}).Create(&Activity{
 				DealID: dealID, Type: t.Type, Source: t.Source, ExternalID: &t.ExternalID, AuthorID: author,
 				Title: t.Title, Body: t.Body, BulletPoints: points, URL: t.URL, OccurredAt: t.OccurredAt,
 			})
