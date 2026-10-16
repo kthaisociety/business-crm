@@ -31,9 +31,6 @@ type Config struct {
 	OIDCClientSecret string
 	PublicURL        string
 	SignInDomain     string
-
-	// AdminEmails become admins when they sign in (docs/adr/0003), so a new environment has an admin.
-	AdminEmails []string
 }
 
 func Load() *Config {
@@ -42,7 +39,6 @@ func Load() *Config {
 		Port:         getEnv("PORT", "8000"),
 		DatabaseURL:  getEnv("DATABASE_URL", ""),
 		DevUserEmail: strings.TrimSpace(getEnv("DEV_USER_EMAIL", "")),
-		AdminEmails:  splitList(getEnv("ADMIN_EMAILS", "")),
 
 		OIDCIssuer:       strings.TrimSpace(getEnv("OIDC_ISSUER", "https://accounts.google.com")),
 		OIDCClientID:     strings.TrimSpace(getEnv("OIDC_CLIENT_ID", "")),
@@ -115,17 +111,6 @@ func (c *Config) Validate() error {
 func isLoopback(url string) bool {
 	return strings.HasPrefix(url, "http://127.0.0.1:") || strings.HasPrefix(url, "http://localhost:") ||
 		url == "http://127.0.0.1" || url == "http://localhost"
-}
-
-// splitList reads a comma-separated list, dropping blanks.
-func splitList(s string) []string {
-	var items []string
-	for _, item := range strings.Split(s, ",") {
-		if item = strings.TrimSpace(item); item != "" {
-			items = append(items, item)
-		}
-	}
-	return items
 }
 
 func getEnv(key, fallback string) string {

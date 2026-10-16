@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"regexp"
-	"slices"
 	"strings"
 	"time"
 
@@ -19,20 +18,19 @@ var ErrNotFound = errors.New("deal not found")
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 type Store struct {
-	db     *gorm.DB
-	admins []string // emails made admins when they sign in (docs/adr/0003)
+	db *gorm.DB
 	// Whether only people already on the team are let in (real sign-in, docs/adr/0004), rather than
 	// anyone signed in joining as a member (the dev user).
 	onlyTeam bool
 }
 
-func NewStore(db *gorm.DB, adminEmails ...string) *Store {
-	return &Store{db: db, admins: adminEmails}
+func NewStore(db *gorm.DB) *Store {
+	return &Store{db: db}
 }
 
 // OnlyTeamMembers makes the store, for real sign-in (docs/adr/0004), let in only people already on the
-// team, or in ADMIN_EMAILS: no request adds anyone else, so a removal can't be undone by a sign-in or a
-// request already under way.
+// team: no request adds anyone else, so a removal can't be undone by a sign-in or a request already under
+// way.
 func (s *Store) OnlyTeamMembers() *Store {
 	s.onlyTeam = true
 	return s
@@ -246,20 +244,15 @@ func contactAt(tx *gorm.DB, id string, company Company) (Contact, error) {
 	return c, err
 }
 
-func (s *Store) isAdminEmail(email string) bool {
-	return slices.ContainsFunc(s.admins, func(e string) bool { return strings.EqualFold(e, email) })
-}
-
-// memberFor finds the signed-in user's member row, taking their name from sign-in, and makes them an
-// admin if ADMIN_EMAILS names them. Someone not on the team is added as a member, unless only team
-// members are let in (OnlyTeamMembers): then it's ErrNotOnTeam, except for ADMIN_EMAILS.
+// memberFor finds the signed-in user's member row, taking their name from sign-in. Someone not on the team
+// is added as a member, unless only team members are let in (OnlyTeamMembers): then it's ErrNotOnTeam.
 func (s *Store) memberFor(tx *gorm.DB, u auth.User) (Member, error) {
 	name := u.Name
 	if name == "" {
 		name = u.Email
 	}
 	m := Member{Email: strings.ToLower(u.Email), Name: name}
-	if s.onlyTeam && !s.isAdminEmail(u.Email) {
+	if s.onlyTeam {
 		// The lock waits out a removal under way, and holds off one until this transaction ends.
 		err := tx.Clauses(clause.Locking{Strength: "NO KEY UPDATE"}).Where("email = ?", m.Email).Take(&m).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -278,13 +271,7 @@ func (s *Store) memberFor(tx *gorm.DB, u auth.User) (Member, error) {
 		return m, err
 	}
 	// The upsert's RETURNING gives the id; the role may predate this sign-in.
-	if err := tx.Where("id = ?", m.ID).Take(&m).Error; err != nil {
-		return m, err
-	}
-	if m.Role != "admin" && s.isAdminEmail(u.Email) {
-		m.Role = "admin"
-		err = tx.Model(&m).Update("role", "admin").Error
-	}
+	err = tx.Where("id = ?", m.ID).Take(&m).Error
 	return m, err
 }
 

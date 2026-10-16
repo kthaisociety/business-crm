@@ -16,6 +16,7 @@ import {
   fetchMembers,
   addMember,
   removeMember,
+  handOverAdmin,
   updateMember,
   updateCompany,
   updateContact,
@@ -333,6 +334,11 @@ export default function App() {
       await updateMember(id, { role })
       // Changing your own role changes what you can do here: Reports, and managing the team.
       if (id === user?.memberId) setUser(await fetchMe())
+      await reload()
+    },
+    handOver: async (id, stepDownTo) => {
+      await handOverAdmin(id, stepDownTo)
+      setUser(await fetchMe())
       await reload()
     },
     remove: async (id) => {

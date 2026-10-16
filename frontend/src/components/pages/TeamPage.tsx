@@ -10,6 +10,8 @@ export type TeamActions = {
   add: (member: MemberInput) => Promise<void>
   setRole: (id: string, role: Role) => Promise<void>
   remove: (id: string) => Promise<void>
+  // Makes the member an admin, and you board or member (docs/adr/0005).
+  handOver: (id: string, stepDownTo: 'board' | 'member') => Promise<void>
 }
 
 type Props = {
@@ -24,6 +26,7 @@ const roleLabel = (role: Role | undefined) => ROLES.find((r) => r.id === role)?.
 
 export default function TeamPage({ members, deals, meId, isAdmin, actions }: Props) {
   const [adding, setAdding] = useState(false)
+  const [handingOver, setHandingOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const changeRole = (id: string, role: Role) => {
@@ -42,7 +45,18 @@ export default function TeamPage({ members, deals, meId, isAdmin, actions }: Pro
               : 'The business team. Admins add people and change roles.'
           }
         />
-        {isAdmin && <AddButton label="Add member" onClick={() => setAdding(true)} />}
+        {isAdmin && (
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setHandingOver(true)}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+            >
+              Hand over admin
+            </button>
+            <AddButton label="Add member" onClick={() => setAdding(true)} />
+          </div>
+        )}
       </div>
       {error && (
         <p role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
@@ -107,6 +121,16 @@ export default function TeamPage({ members, deals, meId, isAdmin, actions }: Pro
         Someone who owns or supports deals stays on the team until their deals are reassigned.
       </p>
 
+      {handingOver && (
+        <HandOverDialog
+          others={members.filter((m) => m.id !== meId)}
+          onHandOver={async (id, stepDownTo) => {
+            await actions.handOver(id, stepDownTo)
+            setHandingOver(false)
+          }}
+          onClose={() => setHandingOver(false)}
+        />
+      )}
       {adding && (
         <AddMemberDialog
           onAdd={async (member) => {
@@ -147,6 +171,45 @@ function AddMemberDialog({ onAdd, onClose }: { onAdd: (member: MemberInput) => P
               {r.label}
             </option>
           ))}
+        </select>
+      </label>
+    </FormDialog>
+  )
+}
+
+function HandOverDialog({
+  others,
+  onHandOver,
+  onClose,
+}: {
+  others: Person[]
+  onHandOver: (id: string, stepDownTo: 'board' | 'member') => Promise<void>
+  onClose: () => void
+}) {
+  const [to, setTo] = useState('')
+  const [stepDownTo, setStepDownTo] = useState<'board' | 'member'>('board')
+  return (
+    <FormDialog title="Hand over admin" submitLabel="Hand over" onSubmit={() => onHandOver(to, stepDownTo)} onClose={onClose}>
+      <p className="text-xs text-gray-600">
+        For a new head of business: they become an admin, and you step down, in one go. Nobody needs to change the
+        app’s configuration.
+      </p>
+      <label className="block">
+        New admin
+        <select required data-autofocus value={to} onChange={(e) => setTo(e.target.value)} className={inputClass}>
+          <option value="">Pick a team member…</option>
+          {others.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name} ({m.email})
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="block">
+        You become
+        <select value={stepDownTo} onChange={(e) => setStepDownTo(e.target.value as 'board' | 'member')} className={inputClass}>
+          <option value="board">Board</option>
+          <option value="member">Member</option>
         </select>
       </label>
     </FormDialog>

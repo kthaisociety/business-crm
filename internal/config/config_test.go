@@ -27,19 +27,6 @@ func TestDevUserFromEnv(t *testing.T) {
 	assert.Equal(t, "dev@kthais.com", u.Email)
 }
 
-func TestAdminEmailsFromEnv(t *testing.T) {
-	setRequired(t)
-	t.Setenv("ADMIN_EMAILS", " alva@example.com, ,oskar@example.com ")
-
-	assert.Equal(t, []string{"alva@example.com", "oskar@example.com"}, Load().AdminEmails)
-}
-
-func TestNoAdminEmailsByDefault(t *testing.T) {
-	setRequired(t)
-
-	assert.Empty(t, Load().AdminEmails)
-}
-
 func setOIDC(t *testing.T) {
 	t.Setenv("OIDC_CLIENT_ID", "client")
 	t.Setenv("OIDC_CLIENT_SECRET", "secret")

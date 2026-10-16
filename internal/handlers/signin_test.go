@@ -41,7 +41,8 @@ func newSignInApp(t *testing.T, adminEmails ...string) *signInApp {
 	})
 	require.NoError(t, err)
 	db := databasetest.Open(t)
-	store := deals.NewStore(db, adminEmails...).OnlyTeamMembers()
+	store := deals.NewStore(db).OnlyTeamMembers()
+	appointAdmins(t, store, adminEmails...)
 	router := NewRouter(Deps{
 		PingDB:   func(context.Context) error { return nil },
 		Frontend: builtUI,
@@ -153,7 +154,7 @@ func TestSomeoneNotOnTheTeamIsRefused(t *testing.T) {
 	assert.Empty(t, team, "a refused sign-in doesn't join the team")
 }
 
-func TestAdminEmailsSignInAndBecomeAdmins(t *testing.T) {
+func TestAnAppointedAdminSignsIn(t *testing.T) {
 	app := newSignInApp(t, "maja@example.com")
 	b := app.browser(t)
 
